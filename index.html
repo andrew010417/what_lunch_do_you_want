@@ -10,10 +10,11 @@
 <body>
   <header class="header">
     <img class="logo" src="assets/logo.png" alt="BioNexus" />
-    <div>
+    <div class="header-text">
       <h1>오늘 점심 뭐 먹지?</h1>
       <p class="sub">출근한 사람을 체크하면 다같이 좋아하는 메뉴가 위로 올라옵니다</p>
     </div>
+    <span class="sync" id="sync">연결 중…</span>
   </header>
 
   <nav class="tabs" id="tabs" role="tablist"></nav>
@@ -34,9 +35,36 @@
 
     <section class="card">
       <div class="section-head">
+        <h2>오늘 조건</h2>
+      </div>
+      <div class="conditions">
+        <div class="cond-row">
+          <div class="cond-label">날씨</div>
+          <div class="cond-body">
+            <div class="chips" id="weather-chips"></div>
+            <p class="hint tight" id="weather-note"></p>
+          </div>
+        </div>
+        <div class="cond-row">
+          <div class="cond-label">기분</div>
+          <div class="cond-body">
+            <div class="chips" id="mood-chips"></div>
+          </div>
+        </div>
+        <div class="cond-row">
+          <div class="cond-label">최근 먹은 것</div>
+          <div class="cond-body">
+            <div id="history"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
         <h2>점심 메뉴 순위</h2>
         <div class="actions">
-          <button class="primary" id="pick">🎲 상위 메뉴 중 뽑기</button>
+          <button class="primary" id="pick">🎡 공동 1등 룰렛 돌리기</button>
         </div>
       </div>
       <label class="toggle" for="hide-disliked">
@@ -45,7 +73,6 @@
         <span>한 명이라도 싫어하면 아예 숨기기</span>
       </label>
       <p class="hint hidden-summary" id="hidden-summary" hidden></p>
-      <div class="pick-result" id="pick-result" hidden></div>
       <ol class="menus" id="menus"></ol>
     </section>
   </main>
@@ -55,6 +82,24 @@
     <h2 id="coming-soon-title"></h2>
     <p>아직 준비 중이에요. 곧 오픈합니다!</p>
   </main>
+
+  <div class="overlay" id="roulette" hidden>
+    <div class="roulette-box" role="dialog" aria-modal="true" aria-labelledby="roulette-title">
+      <h2 id="roulette-title">오늘의 점심 룰렛</h2>
+      <div class="wheel-wrap">
+        <div class="pointer" aria-hidden="true"></div>
+        <canvas id="wheel" width="560" height="560"></canvas>
+      </div>
+      <p class="roulette-result" id="roulette-result" aria-live="polite"></p>
+      <div class="roulette-actions">
+        <button class="primary" id="roulette-eat" hidden>🍽 오늘 이걸로 먹어요</button>
+        <button class="ghost" id="roulette-again" hidden>다시 돌리기</button>
+        <button class="ghost" id="roulette-close">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" hidden></div>
 
   <script src="data.js"></script>
   <script src="app.js"></script>

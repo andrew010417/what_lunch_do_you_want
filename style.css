@@ -38,6 +38,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -49,7 +50,10 @@ body {
   padding: 24px 16px 48px;
 }
 
-.header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+.header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+.header-text { flex: 1 1 240px; min-width: 0; }
+.sync { font-size: .78rem; padding: 4px 10px; border-radius: 999px; background: var(--chip); color: var(--muted); white-space: nowrap; }
+.sync[data-mode="shared"] { color: var(--good); background: var(--good-bg); }
 .logo { width: 84px; height: auto; background: #fff; border-radius: 12px; padding: 4px; }
 h1 { margin: 0; font-size: 1.6rem; }
 h2 { margin: 0; font-size: 1.1rem; }
@@ -184,11 +188,62 @@ button { font: inherit; cursor: pointer; }
 .toggle input:focus-visible + .switch { outline: 2px solid var(--brand-dark); outline-offset: 2px; }
 .hidden-summary { margin: -4px 0 12px; }
 
+/* ---------- 공통 작은 버튼/칩 ---------- */
+.small { padding: 4px 10px; font-size: .82rem; }
+.ghost.on { border-color: var(--good-line); color: var(--good); background: var(--good-bg); }
+.ghost.danger { border-color: var(--bad); color: var(--bad); }
+.chip.tap { cursor: pointer; font: inherit; font-size: .85rem; color: var(--text); }
+.chip.tap:hover { border-color: var(--brand); }
+.chip.tap.active { background: var(--brand-dark); border-color: var(--brand-dark); color: var(--card); }
+.chip small { color: var(--muted); }
+button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--brand-dark); outline-offset: 2px; }
+.hint.tight { margin: 6px 0 0; }
+.focus .actions { margin-top: 4px; }
+.focus-head .ghost { margin-left: auto; }
+
+/* ---------- 오늘 조건 ---------- */
+.conditions { display: grid; gap: 14px; }
+.cond-row { display: grid; grid-template-columns: 96px 1fr; gap: 12px; align-items: start; }
+.cond-label { font-weight: 700; font-size: .9rem; padding-top: 4px; color: var(--muted); }
+.cond-body { min-width: 0; }
+.today-eaten { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+
+/* ---------- 메뉴 줄 추가 요소 ---------- */
+.menu-body { min-width: 0; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ate { font-size: .72rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--brand-dark); color: var(--card); vertical-align: middle; }
+.shops { grid-column: 1 / -1; display: grid; gap: 10px; padding: 12px; border-radius: 10px; background: var(--soft); border: 1px solid var(--line); }
+.shop-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.shop-list li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.shop-list a { font-weight: 700; color: var(--text); }
+.shop-meta { font-size: .82rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.shop-list .ghost { margin-left: auto; }
+.shop-form { display: flex; flex-wrap: wrap; gap: 6px; }
+.shop-form input { font: inherit; font-size: .88rem; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); min-width: 0; }
+.shop-form input[name="name"] { flex: 2 1 140px; }
+.shop-form input[type="number"] { flex: 1 1 90px; }
+.map-link { font-size: .85rem; color: var(--brand-dark); }
+
+/* ---------- 룰렛 ---------- */
+.overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, .55); display: grid; place-items: center; padding: 16px; z-index: 10; }
+.roulette-box { background: var(--card); color: var(--text); border-radius: 18px; padding: 20px; width: min(440px, 100%); display: grid; gap: 14px; text-align: center; }
+.roulette-box h2 { text-wrap: balance; }
+.wheel-wrap { position: relative; width: min(340px, 100%); margin-inline: auto; }
+.wheel-wrap canvas { width: 100%; height: auto; display: block; }
+.pointer { position: absolute; top: -6px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 14px solid transparent; border-right: 14px solid transparent; border-top: 26px solid var(--bad); z-index: 1; }
+.roulette-result { font-size: 1.05rem; font-weight: 700; margin: 0; min-height: 1.6em; color: var(--brand-dark); }
+.roulette-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--text); color: var(--card); padding: 10px 16px; border-radius: 10px; font-size: .9rem; z-index: 20; max-width: calc(100% - 32px); }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
 .coming-soon { text-align: center; padding: 60px 20px; }
 .coming-soon .big { font-size: 3rem; }
 .coming-soon p { color: var(--muted); }
 
 @media (max-width: 520px) {
+  .cond-row { grid-template-columns: 1fr; gap: 6px; }
   .menu { grid-template-columns: 24px 30px 1fr; }
   .menu .badge { grid-column: 3; justify-self: start; }
   .logo { width: 64px; }
