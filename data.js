@@ -2,7 +2,7 @@
 // 점심 메뉴 & 선호도 데이터베이스
 // ---------------------------------------------------------------------
 // - 메뉴의 tags 와 사람의 likes / dislikes 가 겹치면 점수가 오르내립니다.
-//   (좋아함 +1, 싫어함 -1, 최애 favorites +3, 최악 worst -3 — 겹치는 태그마다)
+//   (좋아하는 사람 1명당 +1, 싫어하는 사람 1명당 -1)
 // - 새로운 취향이 생기면 아래 likes / dislikes 에 태그만 추가하세요.
 // =====================================================================
 
@@ -48,10 +48,10 @@ const OFFICES = {
     people: [
       { name: "태형", likes: ["라면"],                      dislikes: [] },
       { name: "승연", likes: ["매운"],                      dislikes: ["돼지국물", "고기"] },
-      { name: "기영", likes: [], dislikes: [], favorites: ["팟타이", "카오팟"], worst: ["치킨"] },
-      { name: "종원", likes: [],                            dislikes: [] },
+      { name: "기영", likes: ["팟타이", "카오팟"],          dislikes: ["치킨"] },
+      { name: "종원", likes: ["치킨"],                      dislikes: [] },
       { name: "영현", likes: ["마라탕", "마라샹궈", "술"],  dislikes: [] },
-      { name: "재형", likes: ["매운", "마라탕", "마라샹궈"], dislikes: [] },
+      { name: "재형", likes: ["매운", "마라탕", "마라샹궈"], dislikes: [], maker: true },
       { name: "은아", likes: ["마라탕"],                    dislikes: [] },
       { name: "수민", likes: ["마라탕"],                    dislikes: [] },
       { name: "찬샘", likes: [],                            dislikes: ["마라"] },
