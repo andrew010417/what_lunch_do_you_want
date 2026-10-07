@@ -4,9 +4,35 @@
     "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16",
   ];
   const STORAGE_KEY = "bionexus-lunch-selection";
+  const HIDE_KEY = "bionexus-lunch-hide-disliked";
+  const FAVORITE_WEIGHT = 3;
 
   const $ = (id) => document.getElementById(id);
-  const state = { office: "gangnam", selected: new Set(loadSelection()) };
+  const state = {
+    office: "gangnam",
+    selected: new Set(loadSelection()),
+    hideDisliked: loadHide(),
+    lastClicked: null,
+  };
+
+  function loadHide() {
+    try { return localStorage.getItem(HIDE_KEY) === "1"; } catch (_) { return false; }
+  }
+
+  function saveHide() {
+    try { localStorage.setItem(HIDE_KEY, state.hideDisliked ? "1" : "0"); } catch (_) {}
+  }
+
+  // 사람 한 명의 취향을 { tag, weight } 목록으로 정리
+  function prefsOf(p) {
+    const list = (tags, weight) => (tags || []).map((tag) => ({ tag, weight }));
+    return {
+      likes: [...list(p.favorites, FAVORITE_WEIGHT), ...list(p.likes, 1)],
+      dislikes: [...list(p.worst, FAVORITE_WEIGHT), ...list(p.dislikes, 1)],
+    };
+  }
+
+  const tagLabel = (pref) => pref.weight > 1 ? `${pref.tag}⭐` : pref.tag;
 
   function loadSelection() {
     try {
@@ -68,20 +94,33 @@
       const ups = [];
       const downs = [];
       for (const p of people) {
-        const liked = p.likes.filter((t) => menu.tags.includes(t));
-        const disliked = p.dislikes.filter((t) => menu.tags.includes(t));
-        if (liked.length) ups.push({ who: p.name, tags: liked });
-        if (disliked.length) downs.push({ who: p.name, tags: disliked });
+        const { likes, dislikes } = prefsOf(p);
+        const liked = likes.filter((x) => menu.tags.includes(x.tag));
+        const disliked = dislikes.filter((x) => menu.tags.includes(x.tag));
+        if (liked.length) ups.push({ who: p.name, prefs: liked });
+        if (disliked.length) downs.push({ who: p.name, prefs: disliked });
       }
-      const score = ups.reduce((s, u) => s + u.tags.length, 0)
-                  - downs.reduce((s, d) => s + d.tags.length, 0);
+      const sum = (list) => list.reduce((s, r) => s + r.prefs.reduce((t, x) => t + x.weight, 0), 0);
+      const score = sum(ups) - sum(downs);
       return { ...menu, index, score, ups, downs };
     }).sort((a, b) => b.score - a.score || a.index - b.index);
   }
 
-  function renderMenus() {
+  // 순위에 보여줄 메뉴 (숨기기 모드면 한 명이라도 싫어하는 메뉴 제외)
+  function visibleMenus() {
     const ranked = scoreMenus();
-    const fmt = (list) => list.map((r) => `${r.who}님(${r.tags.join(", ")})`).join(", ");
+    return state.hideDisliked ? ranked.filter((m) => m.downs.length === 0) : ranked;
+  }
+
+  function renderMenus() {
+    const all = scoreMenus();
+    const ranked = visibleMenus();
+    const hiddenCount = all.length - ranked.length;
+    $("hidden-summary").hidden = !state.hideDisliked;
+    $("hidden-summary").textContent = hiddenCount
+      ? `누군가 싫어하는 메뉴 ${hiddenCount}개를 숨겼어요: ${all.filter((m) => m.downs.length).map((m) => m.name).join(", ")}`
+      : "숨긴 메뉴가 없어요. 체크한 사람 중 아무도 싫어하는 메뉴가 없습니다.";
+    const fmt = (list) => list.map((r) => `${r.who}님(${r.prefs.map(tagLabel).join(", ")})`).join(", ");
 
     $("menus").innerHTML = ranked.map((m, i) => {
       const cls = m.score > 0 ? "good" : m.score < 0 ? "bad" : "";
@@ -104,8 +143,38 @@
     }).join("");
   }
 
+  // 가장 최근에 누른 사람의 취향 카드
+  function renderFocus() {
+    const box = $("focus");
+    const p = OFFICES[state.office].people.find((x) => x.name === state.lastClicked);
+    box.hidden = !p;
+    if (!p) return;
+
+    const { likes, dislikes } = prefsOf(p);
+    const menusFor = (prefs) => MENUS.filter((m) => prefs.some((x) => m.tags.includes(x.tag))).map((m) => m.name);
+    const chips = (prefs, cls) => prefs.map((x) =>
+      `<span class="chip ${cls}">${x.weight > 1 ? (cls === "up" ? "⭐ 최애 " : "💀 최악 ") : ""}#${x.tag}</span>`).join("");
+    const row = (title, prefs, cls) => `
+      <div class="focus-row">
+        <div class="focus-label ${cls}">${title}</div>
+        ${prefs.length
+          ? `<div class="chips">${chips(prefs, cls)}</div><div class="focus-menus">→ ${menusFor(prefs).join(", ")}</div>`
+          : `<div class="focus-empty">아직 등록된 정보가 없어요</div>`}
+      </div>`;
+
+    const on = state.selected.has(p.name);
+    box.innerHTML = `
+      <div class="focus-head">
+        <strong>${p.name}님</strong>
+        <span class="focus-state ${on ? "on" : ""}">${on ? "오늘 출근 ✓" : "선택 해제됨"}</span>
+      </div>
+      ${row("👍 좋아하는 음식", likes, "up")}
+      ${row("👎 싫어하는 음식", dislikes, "down")}`;
+  }
+
   function pickRandom() {
-    const ranked = scoreMenus();
+    const ranked = visibleMenus();
+    if (!ranked.length) return;
     const top = ranked[0].score;
     const pool = top > 0
       ? ranked.filter((m) => m.score === top)
@@ -136,7 +205,9 @@
       return;
     }
     renderPeople();
+    renderFocus();
     renderMenus();
+    $("hide-disliked").checked = state.hideDisliked;
   }
 
   $("tabs").addEventListener("click", (e) => {
@@ -151,6 +222,7 @@
     if (!btn) return;
     const name = btn.dataset.name;
     state.selected.has(name) ? state.selected.delete(name) : state.selected.add(name);
+    state.lastClicked = name;
     $("pick-result").hidden = true;
     saveSelection();
     render();
@@ -164,12 +236,20 @@
 
   $("clear-all").addEventListener("click", () => {
     state.selected.clear();
+    state.lastClicked = null;
     $("pick-result").hidden = true;
     saveSelection();
     render();
   });
 
   $("pick").addEventListener("click", pickRandom);
+
+  $("hide-disliked").addEventListener("change", (e) => {
+    state.hideDisliked = e.target.checked;
+    $("pick-result").hidden = true;
+    saveHide();
+    render();
+  });
 
   render();
 })();

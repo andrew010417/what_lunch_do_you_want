@@ -29,6 +29,7 @@
       </div>
       <div class="people" id="people"></div>
       <p class="hint" id="selection-summary"></p>
+      <div class="focus" id="focus" hidden></div>
     </section>
 
     <section class="card">
@@ -38,6 +39,12 @@
           <button class="primary" id="pick">🎲 상위 메뉴 중 뽑기</button>
         </div>
       </div>
+      <label class="toggle" for="hide-disliked">
+        <input type="checkbox" id="hide-disliked" />
+        <span class="switch" aria-hidden="true"></span>
+        <span>한 명이라도 싫어하면 아예 숨기기</span>
+      </label>
+      <p class="hint hidden-summary" id="hidden-summary" hidden></p>
       <div class="pick-result" id="pick-result" hidden></div>
       <ol class="menus" id="menus"></ol>
     </section>
