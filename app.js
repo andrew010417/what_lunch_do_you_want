@@ -95,7 +95,6 @@
         <span class="check">✓</span>
         ${p.maker ? makerAvatarSvg() : avatarSvg(AVATAR_COLORS[i % AVATAR_COLORS.length])}
         <span class="name">${p.name}님</span>
-        ${p.maker ? `<span class="maker-badge">👑 제작자</span>` : ""}
       </button>`).join("");
 
     const n = state.selected.size;
