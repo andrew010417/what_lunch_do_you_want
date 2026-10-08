@@ -73,7 +73,9 @@ const OFFICES = {
     addressDetail: "1104호, 광교비즈니스센터",
     area: "광교",
     location: { lat: 37.2899, lon: 127.0506 },
-    people: [],
+    people: [
+      { id: "eunjae",    name: "은재", likes: [],                            dislikes: [] },
+    ],
   },
   gwanggyo2: {
     label: "광교2편",
@@ -82,7 +84,9 @@ const OFFICES = {
     addressDetail: "경기도경제과학진흥원 창업보육동 311호",
     area: "광교",
     location: { lat: 37.2945, lon: 127.0456 },
-    people: [],
+    people: [
+      { id: "yuna",      name: "윤아", likes: [],                            dislikes: [] },
+    ],
   },
 };
 

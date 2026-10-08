@@ -55,7 +55,7 @@
     draft: null,          // { likes: Set, dislikes: Set }
     openShops: new Set(), // 가게 목록을 펼친 메뉴 이름
     confirmDelete: null,  // 삭제 확인 대기 중인 가게 id
-    autoWeather: null,    // null: 불러오는 중, "failed", 또는 { kind, temp, rainy }
+    autoWeather: {},      // 사무실 → undefined: 불러오는 중, "failed", 또는 { kind, temp, rainy }
     kakaoResults: {},     // "사무실|메뉴" → { status, keyword, items }
     roulette: null,
   };
@@ -185,8 +185,10 @@
   // =================================================================
   // 날씨
   // =================================================================
-  async function loadWeather() {
-    const loc = OFFICES.gangnam.location;
+  async function loadWeather(officeKey) {
+    if (state.autoWeather[officeKey] !== undefined) return;
+    state.autoWeather[officeKey] = null;
+    const loc = OFFICES[officeKey].location;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 5000);
     try {
@@ -198,9 +200,9 @@
       const rainy = c.precipitation > 0 || (code >= 51 && code <= 67) || (code >= 71 && code <= 86) || code >= 95;
       const temp = Math.round(c.temperature_2m);
       const kind = rainy ? "rain" : temp <= 3 ? "cold" : temp >= 28 ? "hot" : "normal";
-      state.autoWeather = { kind, temp, rainy };
+      state.autoWeather[officeKey] = { kind, temp, rainy };
     } catch (_) {
-      state.autoWeather = "failed";
+      state.autoWeather[officeKey] = "failed";
     } finally {
       clearTimeout(timer);
     }
@@ -210,7 +212,8 @@
   function currentWeather() {
     const day = todayDoc();
     if (day && WEATHERS[day.weather]) return { kind: day.weather, source: "manual" };
-    if (state.autoWeather && state.autoWeather !== "failed") return { kind: state.autoWeather.kind, source: "auto" };
+    const auto = state.autoWeather[state.office];
+    if (auto && auto !== "failed") return { kind: auto.kind, source: "auto" };
     return { kind: "normal", source: "none" };
   }
 
@@ -391,16 +394,17 @@
       `<button class="chip tap ${w.kind === k ? "active" : ""}" data-weather="${k}" aria-pressed="${w.kind === k}">${v.label}</button>`
     ).join("");
 
-    const auto = state.autoWeather;
+    const auto = state.autoWeather[state.office];
+    const area = OFFICES[state.office].area || OFFICES[state.office].label;
     let note;
     if (w.source === "manual") {
       note = "직접 고른 날씨가 모두에게 적용 중이에요. 같은 버튼을 다시 누르면 자동으로 돌아가요.";
-    } else if (auto === null) {
-      note = "강남 날씨를 불러오는 중…";
+    } else if (auto == null) {
+      note = `${area} 날씨를 불러오는 중…`;
     } else if (auto === "failed") {
       note = "날씨를 자동으로 불러오지 못했어요. 오늘 날씨를 직접 골라 주세요.";
     } else {
-      note = `자동: 강남 지금 ${auto.temp}°C, ${auto.rainy ? "비·눈 옴" : "비 안 옴"}`;
+      note = `자동: ${area} 지금 ${auto.temp}°C, ${auto.rainy ? "비·눈 옴" : "비 안 옴"}`;
     }
     const effect = WEATHERS[w.kind].boost ? ` → #${WEATHERS[w.kind].boost} 메뉴 +1` : "";
     $("weather-note").textContent = note + effect;
@@ -896,6 +900,7 @@
     if (!tab) return;
     state.office = tab.dataset.office;
     render();
+    if (OFFICES[state.office].location) loadWeather(state.office);
   });
 
   $("people").addEventListener("click", (e) => {
@@ -1101,5 +1106,5 @@
 
   render();
   connectStore();
-  loadWeather();
+  loadWeather(state.office);
 })();
