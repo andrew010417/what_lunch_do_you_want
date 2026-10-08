@@ -8,6 +8,8 @@
   const SETTINGS_KEY = "bionexus-lunch-settings";
   const LOCAL_STORE_KEY = "bionexus-lunch-local-store";
   const MAX_WHEEL = 12;
+  const KAKAO_KEY_STORAGE = "bionexus-lunch-kakao-key";
+  const WALK_METERS_PER_MIN = 67;
 
   const WEATHERS = {
     normal: { label: "☀️ 보통" },
@@ -54,6 +56,7 @@
     openShops: new Set(), // 가게 목록을 펼친 메뉴 이름
     confirmDelete: null,  // 삭제 확인 대기 중인 가게 id
     autoWeather: null,    // null: 불러오는 중, "failed", 또는 { kind, temp, rainy }
+    kakaoResults: {},     // "사무실|메뉴" → { status, keyword, items }
     roulette: null,
   };
 
@@ -398,6 +401,136 @@
     $("history").innerHTML = today + list;
   }
 
+  // =================================================================
+  // 카카오맵 근처 가게 찾기
+  // =================================================================
+  const kakaoKey = () => (typeof KAKAO_JS_KEY === "string" && KAKAO_JS_KEY.trim()) || readJson(KAKAO_KEY_STORAGE, "") || "";
+  const kakaoResultKey = (menuName) => `${state.office}|${menuName}`;
+  const walkMinutes = (meters) => Math.max(1, Math.round(meters / WALK_METERS_PER_MIN));
+  const searchKeyword = (menu) => menu.search || menu.name.split(/[·(]/)[0].trim();
+  const officeCoords = {};
+  let kakaoPromise = null;
+
+  function loadKakao() {
+    if (kakaoPromise) return kakaoPromise;
+    kakaoPromise = new Promise((resolve, reject) => {
+      if (window.kakao && window.kakao.maps && window.kakao.maps.services) return resolve(window.kakao);
+      const timer = setTimeout(() => reject(new Error("timeout")), 8000);
+      const s = document.createElement("script");
+      s.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(kakaoKey())}&libraries=services&autoload=false`;
+      s.onload = () => {
+        try {
+          window.kakao.maps.load(() => { clearTimeout(timer); resolve(window.kakao); });
+        } catch (e) {
+          clearTimeout(timer);
+          reject(e);
+        }
+      };
+      s.onerror = () => { clearTimeout(timer); reject(new Error("load")); };
+      document.head.appendChild(s);
+    }).catch((e) => {
+      kakaoPromise = null;
+      throw e;
+    });
+    return kakaoPromise;
+  }
+
+  // 사무실 주소 → 좌표 (실패하면 data.js 의 대략 좌표)
+  function officeLatLng(kakao, officeKey) {
+    if (officeCoords[officeKey]) return Promise.resolve(officeCoords[officeKey]);
+    const o = OFFICES[officeKey];
+    return new Promise((resolve) => {
+      new kakao.maps.services.Geocoder().addressSearch(o.address, (res, status) => {
+        const ok = status === kakao.maps.services.Status.OK && res[0];
+        officeCoords[officeKey] = ok ? { lat: Number(res[0].y), lon: Number(res[0].x) } : o.location;
+        resolve(officeCoords[officeKey]);
+      });
+    });
+  }
+
+  async function searchNearby(menu) {
+    const key = kakaoResultKey(menu.name);
+    const keyword = searchKeyword(menu);
+    state.kakaoResults[key] = { status: "loading", keyword };
+    render();
+    try {
+      const kakao = await loadKakao();
+      const c = await officeLatLng(kakao, state.office);
+      const S = kakao.maps.services;
+      const places = await new Promise((resolve, reject) => {
+        new S.Places().keywordSearch(keyword, (data, status) => {
+          if (status === S.Status.OK) resolve(data);
+          else if (status === S.Status.ZERO_RESULT) resolve([]);
+          else reject(new Error("search"));
+        }, {
+          location: new kakao.maps.LatLng(c.lat, c.lon),
+          radius: KAKAO_SEARCH_RADIUS,
+          sort: S.SortBy.DISTANCE,
+          category_group_code: "FD6",
+          size: 10,
+        });
+      });
+      state.kakaoResults[key] = {
+        status: "ok",
+        keyword,
+        items: places.map((p) => ({
+          name: p.place_name,
+          distance: Number(p.distance) || 0,
+          category: (p.category_name || "").split(" > ").pop(),
+          address: p.road_address_name || p.address_name || "",
+          url: p.place_url,
+        })),
+      };
+    } catch (_) {
+      state.kakaoResults[key] = { status: "error", keyword };
+    }
+    render();
+  }
+
+  const isKakaoPlaceUrl = (u) => typeof u === "string" && /^https?:\/\/place\.map\.kakao\.com\/\d+$/.test(u);
+
+  function renderKakao(m) {
+    if (!kakaoKey()) {
+      return `
+        <form class="kakao-key" data-kakao-key>
+          <span class="hint tight">카카오맵으로 근처 가게를 찾으려면 카카오 JavaScript 키가 필요해요.</span>
+          <input id="kakao-key-${m.index}" name="key" placeholder="카카오 JavaScript 키" autocomplete="off" required />
+          <button class="primary small" type="submit">키 저장</button>
+        </form>`;
+    }
+    const r = state.kakaoResults[kakaoResultKey(m.name)];
+    const saved = new Set(shopsOf(m.name).map((s) => s.name));
+    const radius = KAKAO_SEARCH_RADIUS >= 1000 ? `${KAKAO_SEARCH_RADIUS / 1000}km` : `${KAKAO_SEARCH_RADIUS}m`;
+    let body = "";
+    if (r && r.status === "loading") {
+      body = `<p class="hint tight">'${esc(r.keyword)}' 찾는 중…</p>`;
+    } else if (r && r.status === "error") {
+      body = `<p class="hint tight error">카카오맵을 불러오지 못했어요. JavaScript 키가 맞는지, 카카오 개발자 사이트의 [플랫폼 → Web]에
+        <b>${esc(location.origin)}</b> 이 등록됐는지 확인해 주세요. claude.ai 링크 안에서는 보안 정책 때문에 동작하지 않아요.</p>`;
+    } else if (r && r.status === "ok") {
+      body = r.items.length
+        ? `<ul class="kakao-list">${r.items.map((p, i) => `
+            <li>
+              ${isKakaoPlaceUrl(p.url) ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.name)}</a>` : `<strong>${esc(p.name)}</strong>`}
+              <span class="shop-meta">${esc(p.category)} · ${p.distance}m · 도보 ${walkMinutes(p.distance)}분</span>
+              ${saved.has(p.name)
+                ? `<span class="saved">저장됨 ✓</span>`
+                : `<button class="ghost small" data-kakao-save="${m.index}:${i}">➕ 우리 가게로 저장</button>`}
+            </li>`).join("")}</ul>`
+        : `<p class="hint tight">사무실 반경 ${radius} 안에 '${esc(r.keyword)}' 가게가 없어요.</p>`;
+    }
+    const reset = typeof KAKAO_JS_KEY === "string" && KAKAO_JS_KEY.trim()
+      ? "" : `<button class="link-button" data-kakao-key-reset>키 다시 입력</button>`;
+    return `
+      <div class="kakao">
+        <div class="kakao-head">
+          <button class="primary small" data-kakao-search="${m.index}">${r && r.status === "ok" ? "🔄 다시 찾기" : `📍 카카오맵으로 반경 ${radius} 가게 찾기`}</button>
+          ${reset}
+        </div>
+        ${body}
+      </div>`;
+  }
+
   function shopsOf(menuName) {
     return Object.entries(store.restaurants)
       .map(([id, r]) => ({ id, ...r }))
@@ -408,7 +541,7 @@
   function renderShops(m) {
     const shops = shopsOf(m.name);
     const area = OFFICES[state.office].area || "";
-    const query = `${area} ${m.name.split(/[·(]/)[0]}`.trim();
+    const query = `${area} ${searchKeyword(m)}`.trim();
     const items = shops.length
       ? `<ul class="shop-list">${shops.map((r) => {
           const meta = [
@@ -416,8 +549,10 @@
             Number(r.price) > 0 ? `${Number(r.price).toLocaleString("ko-KR")}원` : "",
           ].filter(Boolean).join(" · ");
           const confirming = state.confirmDelete === r.id;
+          const href = isKakaoPlaceUrl(r.kakaoUrl)
+            ? r.kakaoUrl : `https://map.kakao.com/link/search/${encodeURIComponent(area + " " + r.name)}`;
           return `<li>
-            <a href="https://map.naver.com/p/search/${encodeURIComponent(area + " " + r.name)}" target="_blank" rel="noopener">${esc(r.name)}</a>
+            <a href="${esc(href)}" target="_blank" rel="noopener">${esc(r.name)}</a>
             ${meta ? `<span class="shop-meta">${meta}</span>` : ""}
             <button class="ghost small ${confirming ? "danger" : ""}" data-del-shop="${esc(r.id)}">${confirming ? "정말 삭제?" : "삭제"}</button>
           </li>`;
@@ -425,6 +560,7 @@
       : `<p class="hint tight">아직 등록된 가게가 없어요. 자주 가는 곳을 추가해 주세요.</p>`;
     return `
       <div class="shops">
+        ${renderKakao(m)}
         ${items}
         <form class="shop-form" data-add-shop="${m.index}">
           <input id="shop-name-${m.index}" name="name" placeholder="가게 이름" maxlength="40" required />
@@ -432,7 +568,10 @@
           <input id="shop-price-${m.index}" name="price" type="number" min="0" step="500" inputmode="numeric" placeholder="1인 가격(원)" />
           <button class="primary small" type="submit">추가</button>
         </form>
-        <a class="map-link" href="https://map.naver.com/p/search/${encodeURIComponent(query)}" target="_blank" rel="noopener">네이버 지도에서 '${esc(query)}' 찾기 ↗</a>
+        <div class="map-links">
+          <a class="map-link" href="https://map.kakao.com/link/search/${encodeURIComponent(query)}" target="_blank" rel="noopener">카카오맵에서 '${esc(query)}' 보기 ↗</a>
+          <a class="map-link" href="https://map.naver.com/p/search/${encodeURIComponent(query)}" target="_blank" rel="noopener">네이버 지도 ↗</a>
+        </div>
       </div>`;
   }
 
@@ -486,9 +625,18 @@
     if (active && $(active)) $(active).focus();
   }
 
+  function renderOfficeAddress() {
+    const o = OFFICES[state.office];
+    $("office-address").innerHTML = o.address
+      ? `📍 <strong>${esc(o.place || o.label)}</strong> · ${esc(o.address)} ${esc(o.addressDetail || "")}
+         <a href="https://map.kakao.com/link/search/${encodeURIComponent(o.address)}" target="_blank" rel="noopener">카카오맵에서 보기 ↗</a>`
+      : "";
+  }
+
   function render() {
     renderTabs();
     renderSync();
+    renderOfficeAddress();
     const office = OFFICES[state.office];
     const ready = office.people.length > 0;
     $("office-view").hidden = !ready;
@@ -710,6 +858,31 @@
       state.openShops.has(name) ? state.openShops.delete(name) : state.openShops.add(name);
       return render();
     }
+    if (t.dataset.kakaoSearch) return searchNearby(MENUS[Number(t.dataset.kakaoSearch)]);
+    if ("kakaoKeyReset" in t.dataset) {
+      writeJson(KAKAO_KEY_STORAGE, "");
+      if (!window.kakao) kakaoPromise = null;
+      state.kakaoResults = {};
+      return render();
+    }
+    if (t.dataset.kakaoSave) {
+      const [mi, pi] = t.dataset.kakaoSave.split(":").map(Number);
+      const menu = MENUS[mi];
+      const r = state.kakaoResults[kakaoResultKey(menu.name)];
+      const p = r && r.items && r.items[pi];
+      if (!p) return;
+      const id = "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      const ok = await write("restaurants", id, {
+        office: state.office,
+        menu: menu.name,
+        name: p.name,
+        walk: walkMinutes(p.distance),
+        price: 0,
+        ...(isKakaoPlaceUrl(p.url) ? { kakaoUrl: p.url } : {}),
+      });
+      if (ok) toast(`${menu.name}에 '${p.name}'을(를) 저장했어요.`);
+      return;
+    }
     if (t.dataset.delShop) {
       const id = t.dataset.delShop;
       if (state.confirmDelete !== id) {
@@ -724,6 +897,15 @@
   });
 
   $("menus").addEventListener("submit", async (e) => {
+    const keyForm = e.target.closest("[data-kakao-key]");
+    if (keyForm) {
+      e.preventDefault();
+      const key = String(new FormData(keyForm).get("key") || "").trim();
+      if (!key) return;
+      writeJson(KAKAO_KEY_STORAGE, key);
+      toast("카카오 키를 이 브라우저에 저장했어요.");
+      return render();
+    }
     const form = e.target.closest("[data-add-shop]");
     if (!form) return;
     e.preventDefault();

@@ -238,6 +238,23 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
+/* ---------- 사무실 주소 / 카카오맵 ---------- */
+.office-address { margin: -4px 0 16px; font-size: .88rem; color: var(--muted); }
+.office-address a, .map-link { color: var(--brand-dark); }
+.map-links { display: flex; flex-wrap: wrap; gap: 12px; }
+.kakao { display: grid; gap: 8px; padding-bottom: 10px; border-bottom: 1px dashed var(--line); }
+.kakao-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.kakao-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.kakao-list li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.kakao-list a { font-weight: 700; color: var(--text); }
+.kakao-list .ghost, .kakao-list .saved { margin-left: auto; }
+.saved { font-size: .8rem; color: var(--good); font-weight: 700; }
+.kakao-key { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.kakao-key span { flex-basis: 100%; }
+.kakao-key input { flex: 1 1 220px; font: inherit; font-size: .88rem; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); min-width: 0; }
+.link-button { border: none; background: none; padding: 0; color: var(--muted); text-decoration: underline; font-size: .8rem; }
+.hint.error { color: var(--bad); }
+
 .coming-soon { text-align: center; padding: 60px 20px; }
 .coming-soon .big { font-size: 3rem; }
 .coming-soon p { color: var(--muted); }
