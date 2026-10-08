@@ -269,6 +269,8 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .today-field { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: .88rem; color: var(--muted); }
 .today-field select { font: inherit; font-size: .88rem; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); max-width: 100%; }
 
+.migrate { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -6px 0 16px; padding: 10px 14px; border-radius: 12px; background: var(--selected); font-size: .9rem; }
+
 .coming-soon { text-align: center; padding: 60px 20px; }
 .coming-soon .big { font-size: 3rem; }
 .coming-soon p { color: var(--muted); }

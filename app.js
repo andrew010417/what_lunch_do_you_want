@@ -70,18 +70,82 @@
   // =================================================================
   // 저장소: claude.ai 링크에서는 모두가 공유하는 db, 그 외에는 이 브라우저
   // =================================================================
-  const store = { mode: "connecting", prefs: {}, days: {}, restaurants: {} };
+  const store = { mode: "connecting", backend: null, prefs: {}, days: {}, restaurants: {} };
   const COLLECTIONS = ["prefs", "days", "restaurants"];
-  let db = null;
+  const SUPABASE_TABLE = "lunch_docs";
+  const SUPABASE_SDK_URL = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js";
+  let db = null; // claude.ai 링크의 공유 저장소
+  let sb = null; // Supabase 클라이언트
+
+  const supabaseConfigured = () =>
+    typeof SUPABASE_URL === "string" && SUPABASE_URL.trim() !== "" &&
+    typeof SUPABASE_ANON_KEY === "string" && SUPABASE_ANON_KEY.trim() !== "";
+
+  function loadScript(src, timeoutMs = 10000) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      const timer = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+      s.src = src;
+      s.onload = () => { clearTimeout(timer); resolve(); };
+      s.onerror = () => { clearTimeout(timer); reject(new Error("load")); };
+      document.head.appendChild(s);
+    });
+  }
+
+  async function refreshFromSupabase(client) {
+    const { data, error } = await client.from(SUPABASE_TABLE).select("collection,id,data").limit(10000);
+    if (error) throw error;
+    const next = { prefs: {}, days: {}, restaurants: {} };
+    (data || []).forEach((row) => {
+      if (next[row.collection] && row.data && typeof row.data === "object") next[row.collection][row.id] = row.data;
+    });
+    COLLECTIONS.forEach((c) => { store[c] = next[c]; });
+  }
+
+  async function connectSupabase() {
+    if (!supabaseConfigured()) return false;
+    try {
+      if (!(window.supabase && window.supabase.createClient)) await loadScript(SUPABASE_SDK_URL);
+      const client = window.supabase.createClient(SUPABASE_URL.trim(), SUPABASE_ANON_KEY.trim(), {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      await refreshFromSupabase(client);
+      sb = client;
+      store.backend = "supabase";
+      store.mode = "shared";
+      client.channel("lunch-docs")
+        .on("postgres_changes", { event: "*", schema: "public", table: SUPABASE_TABLE }, (payload) => {
+          const removed = payload.eventType === "DELETE";
+          const row = removed ? payload.old : payload.new;
+          if (!row || !COLLECTIONS.includes(row.collection) || typeof row.id !== "string") return;
+          if (removed) delete store[row.collection][row.id];
+          else if (row.data && typeof row.data === "object") store[row.collection][row.id] = row.data;
+          render();
+        })
+        .subscribe();
+      // 실시간 연결이 끊겼던 동안의 변경은 화면으로 돌아올 때 다시 읽어서 맞춤
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") refreshFromSupabase(sb).then(render).catch(() => {});
+      });
+      render();
+      return true;
+    } catch (e) {
+      console.warn("Supabase 연결 실패", e);
+      store.supabaseError = true;
+      return false;
+    }
+  }
 
   function useLocalStore() {
     const saved = readJson(LOCAL_STORE_KEY, {});
     COLLECTIONS.forEach((c) => { store[c] = saved[c] && typeof saved[c] === "object" ? saved[c] : {}; });
     store.mode = "local";
+    store.backend = "local";
     render();
   }
 
   async function connectStore() {
+    if (await connectSupabase()) return;
     try {
       db = window.claude && typeof window.claude.use === "function" ? await window.claude.use("db") : null;
     } catch (_) {
@@ -89,6 +153,7 @@
     }
     if (!db) return useLocalStore();
 
+    store.backend = "claude";
     store.mode = "shared";
     COLLECTIONS.forEach((name) => {
       db.collection(name).onSnapshot((snap) => {
@@ -113,6 +178,20 @@
     if (store.mode === "local") {
       if (data) store[collection][id] = data; else delete store[collection][id];
       writeJson(LOCAL_STORE_KEY, { prefs: store.prefs, days: store.days, restaurants: store.restaurants });
+      render();
+      return true;
+    }
+    if (store.backend === "supabase") {
+      const { error } = data
+        ? await sb.from(SUPABASE_TABLE).upsert({ collection, id, data, updated_at: new Date().toISOString() })
+        : await sb.from(SUPABASE_TABLE).delete().match({ collection, id });
+      if (error) {
+        console.warn("Supabase 저장 실패", error);
+        toast("저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.");
+        return false;
+      }
+      // 실시간 알림이 늦게 와도 내 화면은 바로 반영
+      if (data) store[collection][id] = data; else delete store[collection][id];
       render();
       return true;
     }
@@ -311,11 +390,49 @@
     ).join("");
   }
 
+  // 공유 저장소가 생기기 전에 이 브라우저에 저장해 둔 기록 → 공유 저장소로 옮기기
+  function localLeftovers() {
+    if (store.backend !== "supabase") return [];
+    const saved = readJson(LOCAL_STORE_KEY, {});
+    const rows = [];
+    COLLECTIONS.forEach((c) => {
+      Object.entries(saved[c] && typeof saved[c] === "object" ? saved[c] : {}).forEach(([id, data]) => {
+        if (data && typeof data === "object" && !store[c][id]) rows.push({ collection: c, id, data });
+      });
+    });
+    return rows;
+  }
+
+  function renderMigrate() {
+    const box = $("migrate");
+    const rows = localLeftovers();
+    box.hidden = rows.length === 0;
+    if (rows.length) {
+      box.innerHTML = `이 브라우저에만 저장된 기록이 ${rows.length}개 있어요.
+        <button class="primary small" data-migrate>모두와 공유하기</button>
+        <button class="ghost small" data-migrate-skip>버리기</button>`;
+    }
+  }
+
+  async function migrateLocal() {
+    const rows = localLeftovers().map((r) => ({ ...r, updated_at: new Date().toISOString() }));
+    if (!rows.length) return;
+    const { error } = await sb.from(SUPABASE_TABLE).upsert(rows, { onConflict: "collection,id", ignoreDuplicates: true });
+    if (error) return toast("옮기지 못했어요. 잠시 후 다시 시도해 주세요.");
+    rows.forEach((r) => { if (!store[r.collection][r.id]) store[r.collection][r.id] = r.data; });
+    writeJson(LOCAL_STORE_KEY, {});
+    toast(`기록 ${rows.length}개를 모두와 공유했어요.`);
+    render();
+  }
+
   function renderSync() {
     const el = $("sync");
     el.dataset.mode = store.mode;
     el.textContent = store.mode === "shared" ? "● 모두와 실시간 공유 중"
-      : store.mode === "local" ? "이 브라우저에만 저장돼요" : "연결 중…";
+      : store.mode === "local"
+        ? (store.supabaseError ? "공유 저장소 연결 실패 · 이 브라우저에만 저장돼요" : "이 브라우저에만 저장돼요")
+        : "연결 중…";
+    renderMigrate();
   }
 
   function renderPeople() {
@@ -1081,6 +1198,11 @@
     state.hideDisliked = e.target.checked;
     saveSettings();
     render();
+  });
+
+  $("migrate").addEventListener("click", (e) => {
+    if (e.target.closest("[data-migrate]")) migrateLocal();
+    if (e.target.closest("[data-migrate-skip]")) { writeJson(LOCAL_STORE_KEY, {}); render(); }
   });
 
   $("pick").addEventListener("click", openRoulette);

@@ -16,7 +16,7 @@
 
 ## 실행
 빌드 없이 `index.html`을 브라우저에서 열면 됩니다.
-claude.ai 링크로 열면 취향·기록·가게가 모두와 공유되고, 파일로 열면 그 브라우저에만 저장됩니다.
+`data.js`에 Supabase 키를 넣으면 취향·기록·가게·평가가 모두와 실시간 공유되고, 비워 두면 그 브라우저에만 저장됩니다.
 
 ## 데이터 수정
 `data.js`에서 메뉴(`MENUS`)와 사람별 기본 취향(`OFFICES.gangnam.people`)을 고칠 수 있습니다.
@@ -30,3 +30,9 @@ claude.ai 링크로 열면 취향·기록·가게가 모두와 공유되고, 파
 4. 카카오맵 사용 설정(ON)이 필요하면 [제품 설정 → 카카오맵]에서 켜기
 
 claude.ai 링크 안에서는 보안 정책 때문에 카카오맵 검색이 동작하지 않습니다. GitHub Pages 주소에서 사용하세요.
+
+## Supabase 설정 (공유 저장)
+1. https://supabase.com 에서 New project (Region: Northeast Asia (Seoul))
+2. SQL Editor → New query → `supabase.sql` 내용을 붙여 넣고 Run
+3. Project Settings → API (Data API) 에서 **Project URL**과 **anon / publishable 키**를 `data.js`의 `SUPABASE_URL`, `SUPABASE_ANON_KEY`에 넣기
+   - `service_role` / `secret` 키는 절대 넣지 마세요.

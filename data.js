@@ -103,3 +103,13 @@ const RECENT_DAYS = 5;
 // ---------------------------------------------------------------------
 const KAKAO_JS_KEY = "3c8dc162ddb82ff8fc6bf503c88c6348";
 const KAKAO_SEARCH_RADIUS = 1000; // 사무실에서 몇 m 안을 찾을지 (최대 20000)
+
+// ---------------------------------------------------------------------
+// Supabase 공유 저장소 (모두가 같은 기록을 보게 해 줌)
+// - supabase.com → 프로젝트 → Project Settings → API (또는 Data API) 에서
+//   Project URL 과 anon / publishable 키를 넣으세요. (service_role / secret 키는 절대 넣지 마세요)
+// - 처음 한 번 supabase.sql 을 SQL Editor 에서 실행해야 합니다.
+// - 비워 두면 각자 브라우저에만 저장됩니다.
+// ---------------------------------------------------------------------
+const SUPABASE_URL = "";
+const SUPABASE_ANON_KEY = "";
