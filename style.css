@@ -118,9 +118,9 @@ button { font: inherit; cursor: pointer; }
 }
 .person[aria-pressed="true"] .check { display: block; }
 
-.person.maker { background: linear-gradient(160deg, var(--maker-bg), var(--soft)); border-color: var(--maker-line); }
-.person.maker[aria-pressed="true"] { border-color: var(--maker); box-shadow: 0 0 0 3px var(--maker-line); }
-.person.maker svg { opacity: .8; }
+.person.special { background: linear-gradient(160deg, var(--maker-bg), var(--soft)); border-color: var(--maker-line); }
+.person.special[aria-pressed="true"] { border-color: var(--maker); box-shadow: 0 0 0 3px var(--maker-line); }
+.person.special svg { opacity: .8; }
 
 .hint { color: var(--muted); font-size: .88rem; margin: 12px 0 0; }
 

@@ -244,17 +244,17 @@
       </svg>`;
   }
 
-  // 제작자 전용 아이콘: 정장 + 넥타이 + 선글라스 + 반짝이
-  function makerAvatarSvg() {
+  // 특별 아이콘: 정장 + 넥타이 + 선글라스 + 반짝이
+  function specialAvatarSvg() {
     return `
       <svg viewBox="0 0 64 64" aria-hidden="true">
         <defs>
-          <linearGradient id="maker-ring" x1="0" y1="0" x2="1" y2="1">
+          <linearGradient id="special-ring" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" stop-color="#fcd34d" />
             <stop offset="1" stop-color="#b45309" />
           </linearGradient>
         </defs>
-        <circle cx="32" cy="32" r="30" fill="#1e293b" stroke="url(#maker-ring)" stroke-width="2.5" />
+        <circle cx="32" cy="32" r="30" fill="#1e293b" stroke="url(#special-ring)" stroke-width="2.5" />
         <path d="M8 60c0-13 10.7-21 24-21s24 8 24 21" fill="#0f172a" />
         <path d="M25 39.5 32 50l7-10.5c-2.2-.6-4.5-.9-7-.9s-4.8.3-7 .9z" fill="#f8fafc" />
         <path d="M30.4 41h3.2l1 2.4-1.4 9.6h-2.4l-1.4-9.6z" fill="#dc2626" />
@@ -288,9 +288,9 @@
   function renderPeople() {
     const people = officePeople();
     $("people").innerHTML = people.map((p, i) => `
-      <button class="person${p.maker ? " maker" : ""}" data-id="${p.id}" aria-pressed="${state.selected.has(p.id)}">
+      <button class="person${p.special ? " special" : ""}" data-id="${p.id}" aria-pressed="${state.selected.has(p.id)}">
         <span class="check">✓</span>
-        ${p.maker ? makerAvatarSvg() : avatarSvg(AVATAR_COLORS[i % AVATAR_COLORS.length])}
+        ${p.special ? specialAvatarSvg() : avatarSvg(AVATAR_COLORS[i % AVATAR_COLORS.length])}
         <span class="name">${p.name}님</span>
       </button>`).join("");
 
