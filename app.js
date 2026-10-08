@@ -623,7 +623,22 @@
       r.items.forEach((p, i) => {
         if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return;
         const pos = new kakao.maps.LatLng(p.lat, p.lon);
-        new kakao.maps.CustomOverlay({ map, position: pos, content: `<div class="pin">${i + 1}</div>`, yAnchor: 1.1 });
+        // 번호 핀 + 마우스를 올리면(휴대폰은 탭하면) 가게 이름 말풍선
+        const pin = document.createElement("div");
+        pin.className = "pin";
+        pin.tabIndex = 0;
+        pin.textContent = String(i + 1);
+        const tip = document.createElement("span");
+        tip.className = "pin-tip";
+        tip.textContent = `${p.name} · ${p.distance}m · 도보 ${walkMinutes(p.distance)}분`;
+        pin.appendChild(tip);
+        const overlay = new kakao.maps.CustomOverlay({ map, position: pos, content: pin, yAnchor: 1.1, zIndex: 1 });
+        const raise = () => overlay.setZIndex(10);
+        const lower = () => overlay.setZIndex(1);
+        pin.addEventListener("mouseenter", raise);
+        pin.addEventListener("mouseleave", lower);
+        pin.addEventListener("focus", raise);
+        pin.addEventListener("blur", lower);
         bounds.extend(pos);
       });
       map.setBounds(bounds);

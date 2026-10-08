@@ -258,6 +258,11 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 /* ---------- 지도 / 평가 ---------- */
 .kakao-map { width: 100%; height: 260px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
 .pin { display: inline-block; white-space: nowrap; background: var(--brand-dark); color: var(--card); font-weight: 700; font-size: 12px; min-width: 22px; height: 22px; line-height: 22px; padding: 0 6px; border-radius: 999px; text-align: center; box-shadow: 0 1px 3px rgba(0, 0, 0, .3); border: 2px solid var(--card); }
+.pin { position: relative; cursor: pointer; }
+.pin-tip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: var(--text); color: var(--card); font-size: 12px; font-weight: 600; line-height: 1.4; padding: 4px 8px; border-radius: 6px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0, 0, 0, .25); }
+.pin-tip::after { content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--text); }
+.pin:hover .pin-tip, .pin:focus .pin-tip { display: block; }
+.pin:hover, .pin:focus { outline: none; background: var(--bad); }
 .pin.office { background: var(--bad); font-size: 12px; padding: 0 8px; }
 .pin-no { flex-shrink: 0; width: 22px; height: 22px; line-height: 22px; border-radius: 50%; background: var(--brand-dark); color: var(--card); font-size: .75rem; font-weight: 700; text-align: center; }
 .review-link { font-size: .8rem; color: var(--brand-dark); }
