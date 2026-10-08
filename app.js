@@ -162,6 +162,26 @@
     return map;
   }
 
+  // 우리가 남긴 평가 집계: 메뉴별 / "메뉴|가게"별 { up, down }
+  function ratingStats() {
+    const menus = new Map();
+    const shops = new Map();
+    const add = (map, key, rating) => {
+      const s = map.get(key) || { up: 0, down: 0 };
+      s[rating] += 1;
+      map.set(key, s);
+    };
+    Object.values(store.days).forEach((d) => {
+      if (!d || d.office !== state.office || typeof d.menu !== "string") return;
+      if (d.rating !== "up" && d.rating !== "down") return;
+      add(menus, d.menu, d.rating);
+      if (typeof d.shop === "string" && d.shop) add(shops, `${d.menu}|${d.shop}`, d.rating);
+    });
+    return { menus, shops };
+  }
+
+  const ratingText = (s) => s ? `${s.up ? `👍${s.up}` : ""}${s.up && s.down ? " " : ""}${s.down ? `👎${s.down}` : ""}` : "";
+
   // =================================================================
   // 날씨
   // =================================================================
@@ -202,6 +222,7 @@
     const weather = WEATHERS[currentWeather().kind];
     const mood = MOODS[state.mood];
     const recent = recentEaten();
+    const ratings = ratingStats().menus;
 
     return MENUS.map((menu, index) => {
       const ups = [];
@@ -217,8 +238,14 @@
       if (weather.boost && menu.tags.includes(weather.boost)) extras.push({ text: weather.reason, delta: 1 });
       if (mood.tag && menu.tags.includes(mood.tag)) extras.push({ text: mood.label, delta: 1 });
       if (recent.has(menu.name)) extras.push({ text: `🕒 ${recent.get(menu.name)}일 전에 먹음`, delta: -1 });
+      const rs = ratings.get(menu.name);
+      if (rs && rs.up !== rs.down) {
+        extras.push(rs.up > rs.down
+          ? { text: `⭐ 우리 평가 좋음 (${ratingText(rs)})`, delta: 1 }
+          : { text: `⭐ 우리 평가 별로 (${ratingText(rs)})`, delta: -1 });
+      }
 
-      // 좋아하는 사람 1명당 +1, 싫어하는 사람 1명당 -1, 날씨·기분 +1, 최근 먹음 -1
+      // 좋아하는 사람 1명당 +1, 싫어하는 사람 1명당 -1, 날씨·기분 +1, 최근 먹음 -1, 우리 평가 ±1
       const score = ups.length - downs.length + extras.reduce((s, x) => s + x.delta, 0);
       return { ...menu, index, score, ups, downs, extras };
     }).sort((a, b) => b.score - a.score || a.index - b.index);
@@ -389,13 +416,36 @@
       .filter((d) => d.ago >= 1 && d.ago <= RECENT_DAYS)
       .sort((a, b) => a.ago - b.ago);
 
-    const today = day && typeof day.menu === "string"
-      ? `<div class="today-eaten">오늘: ${emojiOf(day.menu)} <strong>${esc(day.menu)}</strong> 먹음 <button class="ghost small" data-eat="${esc(day.menu)}">기록 취소</button></div>`
-      : `<p class="hint tight">점심을 먹은 뒤 메뉴 옆 🍽 버튼을 누르면 기록돼요. 기록한 메뉴는 ${RECENT_DAYS}일 동안 순위가 1점 내려가요.</p>`;
+    let today;
+    if (day && typeof day.menu === "string") {
+      const shops = shopsOf(day.menu);
+      const shopPicker = shops.length
+        ? `<label class="today-field">어디서?
+            <select id="today-shop">
+              <option value="">선택 안 함</option>
+              ${shops.map((s) => `<option value="${esc(s.name)}" ${day.shop === s.name ? "selected" : ""}>${esc(s.name)}</option>`).join("")}
+            </select></label>`
+        : (day.shop ? `<span class="today-field">${esc(day.shop)}</span>` : "");
+      today = `
+        <div class="today-eaten">
+          <span>오늘: ${emojiOf(day.menu)} <strong>${esc(day.menu)}</strong> 먹음</span>
+          ${shopPicker}
+          <span class="today-field">어땠어요?
+            <button class="chip tap ${day.rating === "up" ? "active" : ""}" data-rate="up" aria-pressed="${day.rating === "up"}">👍 맛있었어요</button>
+            <button class="chip tap ${day.rating === "down" ? "active" : ""}" data-rate="down" aria-pressed="${day.rating === "down"}">👎 별로였어요</button>
+          </span>
+          <button class="ghost small" data-eat="${esc(day.menu)}">기록 취소</button>
+        </div>`;
+    } else {
+      today = `<p class="hint tight">점심을 먹은 뒤 메뉴 옆 🍽 버튼을 누르면 기록돼요. 기록한 메뉴는 ${RECENT_DAYS}일 동안 순위가 1점 내려가고,
+        👍/👎 평가를 남기면 다음 추천에 반영돼요.</p>`;
+    }
     const list = past.length
       ? `<div class="chips">${past.map((d) => {
           const [, m, dd] = d.date.split("-");
-          return `<span class="chip">${Number(m)}/${Number(dd)} ${emojiOf(d.menu)} ${esc(d.menu)} <small>(${d.ago}일 전)</small></span>`;
+          const rate = d.rating === "up" ? " 👍" : d.rating === "down" ? " 👎" : "";
+          const shop = typeof d.shop === "string" && d.shop ? ` · ${esc(d.shop)}` : "";
+          return `<span class="chip">${Number(m)}/${Number(dd)} ${emojiOf(d.menu)} ${esc(d.menu)}${shop}${rate} <small>(${d.ago}일 전)</small></span>`;
         }).join("")}</div>`
       : `<p class="hint tight">최근 ${RECENT_DAYS}일 동안 기록이 없어요.</p>`;
     $("history").innerHTML = today + list;
@@ -409,6 +459,7 @@
   const walkMinutes = (meters) => Math.max(1, Math.round(meters / WALK_METERS_PER_MIN));
   const searchKeyword = (menu) => menu.search || menu.name.split(/[·(]/)[0].trim();
   const officeCoords = {};
+  const mapNodes = {}; // "사무실|메뉴" → { el, map, bounds } (다시 그려도 지도를 새로 만들지 않도록 보관)
   let kakaoPromise = null;
 
   function loadKakao() {
@@ -452,6 +503,7 @@
     const key = kakaoResultKey(menu.name);
     const keyword = searchKeyword(menu);
     state.kakaoResults[key] = { status: "loading", keyword };
+    delete mapNodes[key];
     render();
     try {
       const kakao = await loadKakao();
@@ -473,7 +525,10 @@
       state.kakaoResults[key] = {
         status: "ok",
         keyword,
+        center: c,
         items: places.map((p) => ({
+          lat: Number(p.y),
+          lon: Number(p.x),
           name: p.place_name,
           distance: Number(p.distance) || 0,
           category: (p.category_name || "").split(" > ").pop(),
@@ -501,6 +556,7 @@
     }
     const r = state.kakaoResults[kakaoResultKey(m.name)];
     const saved = new Set(shopsOf(m.name).map((s) => s.name));
+    const shopRatings = ratingStats().shops;
     const radius = KAKAO_SEARCH_RADIUS >= 1000 ? `${KAKAO_SEARCH_RADIUS / 1000}km` : `${KAKAO_SEARCH_RADIUS}m`;
     let body = "";
     if (r && r.status === "loading") {
@@ -515,10 +571,14 @@
             도메인 등록(<b>${esc(location.origin)}</b>)이 빠져도 이렇게 될 수 있어요.</p>`;
     } else if (r && r.status === "ok") {
       body = r.items.length
-        ? `<ul class="kakao-list">${r.items.map((p, i) => `
+        ? `<div class="kakao-map-slot" data-map-key="${esc(kakaoResultKey(m.name))}"></div>
+          <ul class="kakao-list">${r.items.map((p, i) => `
             <li>
+              <span class="pin-no">${i + 1}</span>
               ${isKakaoPlaceUrl(p.url) ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.name)}</a>` : `<strong>${esc(p.name)}</strong>`}
-              <span class="shop-meta">${esc(p.category)} · ${p.distance}m · 도보 ${walkMinutes(p.distance)}분</span>
+              <span class="shop-meta">${esc(p.category)} · ${p.distance}m · 도보 ${walkMinutes(p.distance)}분${
+                shopRatings.get(`${m.name}|${p.name}`) ? ` · 우리 평가 ${ratingText(shopRatings.get(`${m.name}|${p.name}`))}` : ""}</span>
+              ${isKakaoPlaceUrl(p.url) ? `<a class="review-link" href="${esc(p.url)}" target="_blank" rel="noopener">⭐ 별점·리뷰</a>` : ""}
               ${saved.has(p.name)
                 ? `<span class="saved">저장됨 ✓</span>`
                 : `<button class="ghost small" data-kakao-save="${m.index}:${i}">➕ 우리 가게로 저장</button>`}
@@ -537,6 +597,40 @@
       </div>`;
   }
 
+  // 검색 결과 지도: 사무실 🏢 + 가게 번호 핀
+  function mountMaps() {
+    const kakao = window.kakao;
+    if (!kakao || !kakao.maps || !kakao.maps.Map) return;
+    document.querySelectorAll(".kakao-map-slot").forEach((slot) => {
+      const key = slot.dataset.mapKey;
+      const r = state.kakaoResults[key];
+      if (!r || r.status !== "ok" || !r.center) return;
+      let node = mapNodes[key];
+      if (node) {
+        slot.replaceWith(node.el);
+        node.map.relayout();
+        node.map.setBounds(node.bounds);
+        return;
+      }
+      const el = document.createElement("div");
+      el.className = "kakao-map";
+      slot.replaceWith(el);
+      const officePos = new kakao.maps.LatLng(r.center.lat, r.center.lon);
+      const map = new kakao.maps.Map(el, { center: officePos, level: 4 });
+      const bounds = new kakao.maps.LatLngBounds();
+      new kakao.maps.CustomOverlay({ map, position: officePos, content: `<div class="pin office">🏢 사무실</div>`, yAnchor: 1.2, zIndex: 2 });
+      bounds.extend(officePos);
+      r.items.forEach((p, i) => {
+        if (!Number.isFinite(p.lat) || !Number.isFinite(p.lon)) return;
+        const pos = new kakao.maps.LatLng(p.lat, p.lon);
+        new kakao.maps.CustomOverlay({ map, position: pos, content: `<div class="pin">${i + 1}</div>`, yAnchor: 1.1 });
+        bounds.extend(pos);
+      });
+      map.setBounds(bounds);
+      mapNodes[key] = { el, map, bounds };
+    });
+  }
+
   function shopsOf(menuName) {
     return Object.entries(store.restaurants)
       .map(([id, r]) => ({ id, ...r }))
@@ -546,6 +640,7 @@
 
   function renderShops(m) {
     const shops = shopsOf(m.name);
+    const shopRatings = ratingStats().shops;
     const area = OFFICES[state.office].area || "";
     const query = `${area} ${searchKeyword(m)}`.trim();
     const items = shops.length
@@ -553,6 +648,7 @@
           const meta = [
             Number(r.walk) > 0 ? `도보 ${Number(r.walk)}분` : "",
             Number(r.price) > 0 ? `${Number(r.price).toLocaleString("ko-KR")}원` : "",
+            ratingText(shopRatings.get(`${m.name}|${r.name}`)),
           ].filter(Boolean).join(" · ");
           const confirming = state.confirmDelete === r.id;
           const href = isKakaoPlaceUrl(r.kakaoUrl)
@@ -627,6 +723,7 @@
         </li>`;
     }).join("");
 
+    mountMaps();
     Object.entries(typed).forEach(([id, v]) => { const el = $(id); if (el) el.value = v; });
     if (active && $(active)) $(active).focus();
   }
@@ -846,13 +943,24 @@
   async function toggleEaten(name) {
     const day = todayDoc();
     const undo = day && day.menu === name;
-    const ok = await updateToday({ menu: undo ? null : name });
+    const changed = !day || day.menu !== name;
+    const ok = await updateToday(undo || changed ? { menu: undo ? null : name, shop: null, rating: null } : { menu: name });
     if (ok) toast(undo ? "오늘 기록을 지웠어요." : `오늘 ${name} 먹은 걸로 기록했어요.`);
   }
 
-  $("history").addEventListener("click", (e) => {
-    const t = e.target.closest("[data-eat]");
-    if (t) toggleEaten(t.dataset.eat);
+  $("history").addEventListener("click", async (e) => {
+    const eat = e.target.closest("[data-eat]");
+    if (eat) return toggleEaten(eat.dataset.eat);
+    const rate = e.target.closest("[data-rate]");
+    if (rate) {
+      const day = todayDoc();
+      const next = day && day.rating === rate.dataset.rate ? null : rate.dataset.rate;
+      if (await updateToday({ rating: next })) toast(next ? "평가를 남겼어요. 다음 추천에 반영돼요." : "평가를 지웠어요.");
+    }
+  });
+
+  $("history").addEventListener("change", (e) => {
+    if (e.target.id === "today-shop") updateToday({ shop: e.target.value || null });
   });
 
   $("menus").addEventListener("click", async (e) => {
@@ -885,6 +993,7 @@
         walk: walkMinutes(p.distance),
         price: 0,
         ...(isKakaoPlaceUrl(p.url) ? { kakaoUrl: p.url } : {}),
+        ...(Number.isFinite(p.lat) ? { lat: p.lat, lon: p.lon } : {}),
       });
       if (ok) toast(`${menu.name}에 '${p.name}'을(를) 저장했어요.`);
       return;
@@ -962,7 +1071,7 @@
     if (!r || !r.choice) return;
     const day = todayDoc();
     if (!(day && day.menu === r.choice.name)) {
-      const ok = await updateToday({ menu: r.choice.name });
+      const ok = await updateToday({ menu: r.choice.name, shop: null, rating: null });
       if (!ok) return;
     }
     toast(`오늘 ${r.choice.name} 먹은 걸로 기록했어요.`);

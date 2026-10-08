@@ -255,6 +255,15 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .link-button { border: none; background: none; padding: 0; color: var(--muted); text-decoration: underline; font-size: .8rem; }
 .hint.error { color: var(--bad); }
 
+/* ---------- 지도 / 평가 ---------- */
+.kakao-map { width: 100%; height: 260px; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); }
+.pin { display: inline-block; white-space: nowrap; background: var(--brand-dark); color: var(--card); font-weight: 700; font-size: 12px; min-width: 22px; height: 22px; line-height: 22px; padding: 0 6px; border-radius: 999px; text-align: center; box-shadow: 0 1px 3px rgba(0, 0, 0, .3); border: 2px solid var(--card); }
+.pin.office { background: var(--bad); font-size: 12px; padding: 0 8px; }
+.pin-no { flex-shrink: 0; width: 22px; height: 22px; line-height: 22px; border-radius: 50%; background: var(--brand-dark); color: var(--card); font-size: .75rem; font-weight: 700; text-align: center; }
+.review-link { font-size: .8rem; color: var(--brand-dark); }
+.today-field { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: .88rem; color: var(--muted); }
+.today-field select { font: inherit; font-size: .88rem; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); max-width: 100%; }
+
 .coming-soon { text-align: center; padding: 60px 20px; }
 .coming-soon .big { font-size: 3rem; }
 .coming-soon p { color: var(--muted); }
