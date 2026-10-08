@@ -1,6 +1,31 @@
 # BioNexus 점심 고르기
 
 출근한 사람을 체크하면 그 사람들이 좋아하는 메뉴는 위로, 싫어하는 메뉴는 아래로 정렬해 주는 웹 페이지입니다.
+Claude Code(AI 코딩 에이전트)로 개발했고, 카카오맵 API로 사무실 근처 식당을 찾아 줍니다.
+
+👉 **바로 사용하기: https://andrew010417.github.io/what_lunch_do_you_want/**
+
+![BioNexus 점심 고르기 화면](assets/screenshot.webp)
+
+## 저장소
+| 위치 | 주소 |
+|---|---|
+| 웹페이지 (GitHub Pages) | https://andrew010417.github.io/what_lunch_do_you_want/ |
+| GitHub | https://github.com/andrew010417/what_lunch_do_you_want |
+| 사내 GitLab | https://gitlab.bionexus.co.kr/bionexus-enterprise/edu/onboarding_1th/what_lunch_do_you_want |
+
+## 사무실
+| 탭 | 위치 | 주소 |
+|---|---|---|
+| 강남편 | 강남 연구소 (기업부설연구소) | 서울특별시 서초구 강남대로 373 13층 |
+| 광교1편 | 수원 본사 | 경기도 수원시 영통구 광교로 156 1104호, 광교비즈니스센터 |
+| 광교2편 | 광교 기업부설연구소2 | 경기도 수원시 영통구 광교로 107 경기도경제과학진흥원 창업보육동 311호 |
+
+## 사용한 기술
+- HTML / CSS / JavaScript (빌드 도구 없음)
+- 카카오맵 JavaScript API: 주소 → 좌표, 근처 식당 검색, 지도 핀
+- Open-Meteo: 사무실 위치의 현재 날씨
+- Supabase (선택): 기록 공유 저장소
 
 ## 기능
 - 출근한 사람 체크 → 메뉴 순위 정렬 (좋아하는 사람 1명당 +1, 싫어하는 사람 1명당 -1)
