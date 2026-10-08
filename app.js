@@ -415,7 +415,7 @@
     if (kakaoPromise) return kakaoPromise;
     kakaoPromise = new Promise((resolve, reject) => {
       if (window.kakao && window.kakao.maps && window.kakao.maps.services) return resolve(window.kakao);
-      const timer = setTimeout(() => reject(new Error("timeout")), 8000);
+      const timer = setTimeout(() => reject(new Error("sdk")), 8000);
       const s = document.createElement("script");
       s.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(kakaoKey())}&libraries=services&autoload=false`;
       s.onload = () => {
@@ -423,10 +423,10 @@
           window.kakao.maps.load(() => { clearTimeout(timer); resolve(window.kakao); });
         } catch (e) {
           clearTimeout(timer);
-          reject(e);
+          reject(new Error("sdk"));
         }
       };
-      s.onerror = () => { clearTimeout(timer); reject(new Error("load")); };
+      s.onerror = () => { clearTimeout(timer); reject(new Error("sdk")); };
       document.head.appendChild(s);
     }).catch((e) => {
       kakaoPromise = null;
@@ -481,8 +481,9 @@
           url: p.place_url,
         })),
       };
-    } catch (_) {
-      state.kakaoResults[key] = { status: "error", keyword };
+    } catch (e) {
+      // sdk: 지도 스크립트 자체를 못 불러옴 / search: 스크립트는 됐지만 검색이 거부됨
+      state.kakaoResults[key] = { status: "error", keyword, stage: e && e.message === "sdk" ? "sdk" : "search" };
     }
     render();
   }
@@ -505,8 +506,13 @@
     if (r && r.status === "loading") {
       body = `<p class="hint tight">'${esc(r.keyword)}' 찾는 중…</p>`;
     } else if (r && r.status === "error") {
-      body = `<p class="hint tight error">카카오맵을 불러오지 못했어요. JavaScript 키가 맞는지, 카카오 개발자 사이트의 [플랫폼 → Web]에
-        <b>${esc(location.origin)}</b> 이 등록됐는지 확인해 주세요. claude.ai 링크 안에서는 보안 정책 때문에 동작하지 않아요.</p>`;
+      body = r.stage === "sdk"
+        ? `<p class="hint tight error"><b>[1단계 실패] 카카오 지도 스크립트를 불러오지 못했어요.</b><br>
+            카카오 개발자 사이트에서 JavaScript 키가 맞는지, <b>JavaScript SDK 도메인</b>(또는 플랫폼 → Web 사이트 도메인)에
+            <b>${esc(location.origin)}</b> 이 등록됐는지 확인해 주세요. claude.ai 링크 안에서는 보안 정책 때문에 동작하지 않아요.</p>`
+        : `<p class="hint tight error"><b>[2단계 실패] 지도 스크립트는 불러왔지만 카카오가 장소 검색을 거부했어요.</b><br>
+            카카오 개발자 사이트의 <b>제품 설정 → 카카오맵</b>에서 <b>사용 설정을 ON</b>으로 켰는지 확인해 주세요.
+            도메인 등록(<b>${esc(location.origin)}</b>)이 빠져도 이렇게 될 수 있어요.</p>`;
     } else if (r && r.status === "ok") {
       body = r.items.length
         ? `<ul class="kakao-list">${r.items.map((p, i) => `
