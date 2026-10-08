@@ -57,7 +57,7 @@ const OFFICES = {
       { id: "seungyeon", name: "승연", likes: ["매운"],                      dislikes: ["돼지국물", "고기"] },
       { id: "giyoung",   name: "기영", likes: ["팟타이", "카오팟"],          dislikes: ["치킨"] },
       { id: "jongwon",   name: "종원", likes: ["치킨"],                      dislikes: [] },
-      { id: "younghyun", name: "영현", likes: ["마라탕", "마라샹궈", "술"],  dislikes: [], special: true },
+      { id: "younghyun", name: "영현", likes: ["마라탕", "마라샹궈", "술"],  dislikes: [] },
       { id: "jaehyung",  name: "재형", likes: ["매운", "마라탕", "마라샹궈"], dislikes: [] },
       { id: "euna",      name: "은아", likes: ["마라탕"],                    dislikes: [] },
       { id: "sumin",     name: "수민", likes: ["마라탕"],                    dislikes: [] },
