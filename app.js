@@ -4,7 +4,6 @@
     "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16",
   ];
   const WHEEL_COLORS = ["#c7d6ea", "#f6d7a7", "#cfe8d5", "#f3c9c9", "#ddd3f0", "#bfe3e6"];
-  const SELECTION_KEY = "bionexus-lunch-selection-v2";
   const SETTINGS_KEY = "bionexus-lunch-settings";
   const LOCAL_STORE_KEY = "bionexus-lunch-local-store";
   const MAX_WHEEL = 12;
@@ -44,10 +43,8 @@
   }
 
   const settings = readJson(SETTINGS_KEY, {});
-  const savedSelection = readJson(SELECTION_KEY, null);
   const state = {
     office: "gangnam",
-    selected: new Set(savedSelection && savedSelection.date === todayKey() ? savedSelection.ids : []),
     hideDisliked: !!settings.hideDisliked,
     mood: settings.moodDate === todayKey() && MOODS[settings.mood] ? settings.mood : "any",
     lastClicked: null,
@@ -59,9 +56,6 @@
     roulette: null,
   };
 
-  function saveSelection() {
-    writeJson(SELECTION_KEY, { date: todayKey(), ids: [...state.selected] });
-  }
   function saveSettings() {
     writeJson(SETTINGS_KEY, { hideDisliked: state.hideDisliked, mood: state.mood, moodDate: todayKey() });
   }
@@ -69,9 +63,9 @@
   // =================================================================
   // 저장소: claude.ai 링크에서는 모두가 공유하는 db, 그 외에는 이 브라우저
   // =================================================================
-  const store = { mode: "connecting", backend: null, people: {}, prefs: {}, days: {}, restaurants: {}, secrets: {} };
+  const store = { mode: "connecting", backend: null, people: {}, prefs: {}, days: {}, restaurants: {}, checkins: {}, requests: {}, secrets: {} };
   // secrets: Supabase가 없을 때만 쓰는 로그인 확인용 (Supabase에서는 서버의 lunch_secrets 표가 대신함)
-  const COLLECTIONS = ["people", "prefs", "days", "restaurants", "secrets"];
+  const COLLECTIONS = ["people", "prefs", "days", "restaurants", "checkins", "requests", "secrets"];
   const SUPABASE_TABLE = "lunch_docs";
   const SUPABASE_SDK_URL = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js";
   let db = null; // claude.ai 링크의 공유 저장소
@@ -95,7 +89,7 @@
   async function refreshFromSupabase(client) {
     const { data, error } = await client.from(SUPABASE_TABLE).select("collection,id,data").limit(10000);
     if (error) throw error;
-    const next = { people: {}, prefs: {}, days: {}, restaurants: {}, secrets: {} };
+    const next = Object.fromEntries(COLLECTIONS.map((c) => [c, {}]));
     (data || []).forEach((row) => {
       if (next[row.collection] && row.data && typeof row.data === "object") next[row.collection][row.id] = row.data;
     });
@@ -179,7 +173,7 @@
     }
     if (store.mode === "local") {
       if (data) store[collection][id] = data; else delete store[collection][id];
-      writeJson(LOCAL_STORE_KEY, { people: store.people, prefs: store.prefs, days: store.days, restaurants: store.restaurants, secrets: store.secrets });
+      writeJson(LOCAL_STORE_KEY, Object.fromEntries(COLLECTIONS.map((c) => [c, store[c]])));
       render();
       return true;
     }
@@ -189,7 +183,10 @@
         : await sb.from(SUPABASE_TABLE).delete().match({ collection, id });
       if (error) {
         console.warn("Supabase 저장 실패", error);
-        toast("저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.");
+        const outdated = /23514|42501|check constraint|row-level security/i.test(`${error.code} ${error.message}`);
+        toast(outdated
+          ? "서버 설정이 최신이 아니에요. 관리자가 Supabase에서 supabase.sql을 다시 실행해야 해요."
+          : "저장하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.");
         return false;
       }
       // 실시간 알림이 늦게 와도 내 화면은 바로 반영
@@ -314,7 +311,21 @@
   const findPersonByName = (name) => allPeople().find((p) => p.name.toLowerCase() === name.trim().toLowerCase());
   const officeShort = (key) => (OFFICES[key] ? OFFICES[key].label.replace("편", "") : "");
   const colorOf = (id) => AVATAR_COLORS[[...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % AVATAR_COLORS.length];
-  const selectedPeople = () => allPeople().filter((p) => state.selected.has(p.id));
+  // 오늘의 명단 = 출석 체크(checkins). 모두가 같은 명단을 봄
+  // 사람마다 하루 한 줄(ci_날짜_사람id)이라, 다른 사무실에서 다시 체크인하면 그쪽으로 옮겨짐
+  const checkinId = (personId) => `ci_${todayKey()}_${personId}`;
+  const todaysCheckins = (office = state.office) => Object.values(store.checkins)
+    .filter((c) => c && c.date === todayKey() && c.office === office && typeof c.person === "string");
+  const selectedIds = () => new Set(todaysCheckins().map((c) => c.person));
+  const selectedPeople = () => { const ids = selectedIds(); return allPeople().filter((p) => ids.has(p.id)); };
+  const myCheckin = () => session && store.checkins[checkinId(session.id)];
+
+  function checkIn(personId) {
+    return write("checkins", checkinId(personId), {
+      office: state.office, date: todayKey(), person: personId, by: session ? session.id : null, at: new Date().toISOString(),
+    });
+  }
+  const checkOut = (personId) => write("checkins", checkinId(personId), null);
   const dayId = (date) => `${state.office}_${date}`;
   const todayDoc = () => store.days[dayId(todayKey())] || null;
 
@@ -542,8 +553,21 @@
       </div>`;
   }
 
+  function renderCheckinButton() {
+    const btn = $("checkin");
+    const mine = myCheckin();
+    const here = mine && mine.office === state.office;
+    btn.classList.toggle("on", !!here);
+    btn.textContent = !session ? "🙋 로그인하고 출석 체크"
+      : here ? "✓ 출석함 (취소)"
+      : mine ? `🙋 여기로 옮기기 (지금 ${officeShort(mine.office)})`
+      : "🙋 나 오늘 여기서 먹어요";
+  }
+
   function renderPeople() {
+    renderCheckinButton();
     const people = selectedPeople();
+    const ids = selectedIds();
     $("people").innerHTML = people.map(personCard).join("");
     $("people").hidden = people.length === 0;
 
@@ -553,17 +577,18 @@
     $("people-results").innerHTML = q
       ? (matches.length
         ? matches.map((p) => {
-            const on = state.selected.has(p.id);
+            const on = ids.has(p.id);
             return `<button class="chip tap ${on ? "active" : ""}" data-pick="${p.id}" aria-pressed="${on}">${on ? "✓ " : "+ "}${esc(p.name)}님 <small>${officeShort(p.office)}</small></button>`;
           }).join("")
         : `<p class="hint tight">'${esc(q)}'(으)로 찾은 사람이 없어요. 아직 가입 전이면 오른쪽 위 🔑 로그인에서 가입할 수 있어요.</p>`)
       : "";
 
+    const where = officeShort(state.office);
     $("selection-summary").textContent = allPeople().length === 0
-      ? "아직 가입한 사람이 없어요. 오른쪽 위 🔑 로그인에서 이름과 좋아하는 음식으로 가입해 주세요."
+      ? "아직 가입한 사람이 없어요. 오른쪽 위 🔑 로그인 / 가입에서 이름과 좋아하는 음식으로 가입해 주세요."
       : people.length === 0
-      ? "오늘 같이 먹는 사람을 이름으로 검색해서 추가하세요. 아무도 없으면 모든 메뉴를 기본 순서로 보여줍니다."
-      : `오늘 ${people.length}명: ${people.map((p) => p.name + "님").join(", ")}`;
+      ? `오늘 ${where}에서 먹는 사람이 아직 없어요. 각자 🙋 버튼을 누르거나 이름을 검색해서 추가하세요. 모두의 화면에 똑같이 보여요.`
+      : `오늘 ${where}에서 ${people.length}명: ${people.map((p) => p.name + "님").join(", ")} · 모두의 화면에 같은 명단이 보여요`;
   }
 
   // 메뉴 이름 자체(예: 마라탕)도 좋아요/싫어요 대상
@@ -579,7 +604,7 @@
     box.hidden = !p;
     if (!p) return;
 
-    const on = state.selected.has(p.id);
+    const on = selectedIds().has(p.id);
     const mine = session && session.id === p.id;
     const head = `
       <div class="focus-head">
@@ -747,9 +772,12 @@
     $("me-button").focus();
   }
 
-  function startSession(id, secret) {
+  function startSession(id, secret, isNew = false) {
     session = { id, secret };
     writeJson(SESSION_KEY, session);
+    // 가입하자마자, 또는 출석 버튼을 눌러 로그인한 경우 오늘 명단에 바로 넣음
+    if (isNew || auth.afterLogin === "checkin") checkIn(id);
+    auth.afterLogin = null;
     const me = personById(id);
     auth.step = "edit";
     auth.office = (me && me.office) || "";
@@ -1281,11 +1309,7 @@
 
   $("people").addEventListener("click", (e) => {
     const remove = e.target.closest("[data-remove]");
-    if (remove) {
-      state.selected.delete(remove.dataset.remove);
-      saveSelection();
-      return render();
-    }
+    if (remove) return checkOut(remove.dataset.remove);
     const btn = e.target.closest(".person");
     if (!btn) return;
     focusOn(btn.dataset.id);
@@ -1293,9 +1317,8 @@
   });
 
   function togglePick(id) {
-    state.selected.has(id) ? state.selected.delete(id) : state.selected.add(id);
     focusOn(id);
-    saveSelection();
+    return selectedIds().has(id) ? checkOut(id) : checkIn(id);
   }
 
   $("people-results").addEventListener("click", (e) => {
@@ -1318,7 +1341,8 @@
     if (e.key !== "Enter" || e.isComposing) return;
     e.preventDefault();
     const q = state.query.trim();
-    const first = q && allPeople().find((p) => p.name.includes(q) && !state.selected.has(p.id));
+    const ids = selectedIds();
+    const first = q && allPeople().find((p) => p.name.includes(q) && !ids.has(p.id));
     if (!first) return;
     togglePick(first.id);
     state.query = "";
@@ -1451,18 +1475,39 @@
     }
   });
 
-  $("select-all").addEventListener("click", () => {
-    officePeople().forEach((p) => state.selected.add(p.id));
-    toast(`${OFFICES[state.office].label.replace("편", "")} 사무실 분들을 모두 추가했어요.`);
-    saveSelection();
+  $("select-all").addEventListener("click", async () => {
+    const ids = selectedIds();
+    const todo = officePeople().filter((p) => !ids.has(p.id));
+    for (const p of todo) { if (!(await checkIn(p.id))) return; }
+    toast(todo.length ? `주 사무실이 ${officeShort(state.office)}인 ${todo.length}명을 오늘 명단에 넣었어요.` : "이미 모두 들어 있어요.");
+  });
+
+  // 명단은 모두가 같이 쓰므로 비우기는 두 번 눌러야 함
+  let clearArmed = null;
+  $("clear-all").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    if (!clearArmed) {
+      btn.textContent = "정말 모두 뺄까요?";
+      btn.classList.add("danger");
+      clearArmed = setTimeout(() => { clearArmed = null; btn.textContent = "초기화"; btn.classList.remove("danger"); }, 3000);
+      return;
+    }
+    clearTimeout(clearArmed); clearArmed = null;
+    btn.textContent = "초기화"; btn.classList.remove("danger");
+    for (const c of todaysCheckins()) { if (!(await checkOut(c.person))) return; }
+    state.lastClicked = null;
+    toast(`오늘 ${officeShort(state.office)} 명단을 비웠어요.`);
     render();
   });
 
-  $("clear-all").addEventListener("click", () => {
-    state.selected.clear();
-    state.lastClicked = null;
-    saveSelection();
-    render();
+  $("checkin").addEventListener("click", async () => {
+    if (!session) { auth.afterLogin = "checkin"; return openMe(); }
+    const mine = myCheckin();
+    if (mine && mine.office === state.office) {
+      if (await checkOut(session.id)) toast("출석을 취소했어요.");
+      return;
+    }
+    if (await checkIn(session.id)) toast(`오늘 ${officeShort(state.office)}에서 먹는 걸로 체크했어요. 🙋`);
   });
 
   $("hide-disliked").addEventListener("change", (e) => {
@@ -1588,7 +1633,7 @@
       const result = await registerPerson(auth.name, office, again);
       auth.busy = false;
       if (/^u[0-9a-f]{12}$/.test(result)) {
-        startSession(result, again);
+        startSession(result, again, true);
         toast(`가입했어요, ${auth.name}님! 이제 좋아하는 음식과 싫어하는 음식을 골라 주세요.`);
         render();
       } else {

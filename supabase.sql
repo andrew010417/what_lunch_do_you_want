@@ -13,10 +13,12 @@ create table if not exists public.lunch_docs (
   primary key (collection, id)
 );
 
--- 예전 버전에서 만든 표도 '사람(people)'을 담을 수 있게
+-- 담을 수 있는 기록 종류 (예전 버전에서 만든 표도 새 종류를 담을 수 있게 다시 정함)
+--   people: 가입한 사람 / prefs: 취향 / days: 먹은 기록·평가·날씨 / restaurants: 저장한 가게
+--   checkins: 오늘 어느 사무실에서 먹는지(출석 체크) / requests: 메뉴 추가 요청
 alter table public.lunch_docs drop constraint if exists lunch_docs_collection_check;
 alter table public.lunch_docs add constraint lunch_docs_collection_check
-  check (collection in ('people', 'prefs', 'days', 'restaurants'));
+  check (collection in ('people', 'prefs', 'days', 'restaurants', 'checkins', 'requests'));
 
 -- 같은 이름으로 두 번 가입하지 못하게
 create unique index if not exists lunch_people_name_unique
@@ -30,11 +32,15 @@ drop policy if exists "lunch insert" on public.lunch_docs;
 drop policy if exists "lunch update" on public.lunch_docs;
 drop policy if exists "lunch delete" on public.lunch_docs;
 
--- 읽기는 누구나. 먹은 기록·평가·가게는 누구나 쓰고, 사람(people)과 취향(prefs)은 아래 함수로만 바뀜
+-- 읽기는 누구나. 먹은 기록·가게·출석·메뉴 요청은 누구나 쓰고, 사람(people)과 취향(prefs)은 아래 함수로만 바뀜
 create policy "lunch read"   on public.lunch_docs for select to anon, authenticated using (true);
-create policy "lunch insert" on public.lunch_docs for insert to anon, authenticated with check (collection in ('days', 'restaurants'));
-create policy "lunch update" on public.lunch_docs for update to anon, authenticated using (collection in ('days', 'restaurants')) with check (collection in ('days', 'restaurants'));
-create policy "lunch delete" on public.lunch_docs for delete to anon, authenticated using (collection in ('days', 'restaurants'));
+create policy "lunch insert" on public.lunch_docs for insert to anon, authenticated
+  with check (collection in ('days', 'restaurants', 'checkins', 'requests'));
+create policy "lunch update" on public.lunch_docs for update to anon, authenticated
+  using (collection in ('days', 'restaurants', 'checkins', 'requests'))
+  with check (collection in ('days', 'restaurants', 'checkins', 'requests'));
+create policy "lunch delete" on public.lunch_docs for delete to anon, authenticated
+  using (collection in ('days', 'restaurants', 'checkins', 'requests'));
 
 -- 다른 사람이 저장하면 내 화면에도 바로 반영되도록 실시간 알림 켜기
 do $$

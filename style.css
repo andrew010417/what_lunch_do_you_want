@@ -203,6 +203,7 @@ button { font: inherit; cursor: pointer; }
 /* ---------- 공통 작은 버튼/칩 ---------- */
 .small { padding: 4px 10px; font-size: .82rem; }
 .ghost.on { border-color: var(--good-line); color: var(--good); background: var(--good-bg); }
+#checkin.on { background: var(--good-bg); color: var(--good); border: 1px solid var(--good-line); }
 .ghost.danger { border-color: var(--bad); color: var(--bad); }
 .chip.tap { cursor: pointer; font: inherit; font-size: .85rem; color: var(--text); }
 .chip.tap:hover { border-color: var(--brand); }
