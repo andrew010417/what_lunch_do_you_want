@@ -687,13 +687,13 @@
     body.innerHTML = `
       <h2 id="me-title">로그인 / 가입</h2>
       <p class="hint tight">이름과 <b>제일 좋아하는 음식</b>을 입력하세요. 처음이면 바로 가입되고, 이 음식이 비밀번호가 돼요.
-        남들이 맞히기 어려운 음식으로 정해 주세요. (예: 엄마 김치찌개)</p>
+        남들이 맞히기 어려운 음식으로 정해 주세요. (예: 어머니표 김치찌개)</p>
       <form class="me-form" id="login-form">
         <label class="me-field">이름
           <input id="login-name" maxlength="20" autocomplete="off" placeholder="예: 박재형" value="${esc(auth.name)}" required />
         </label>
         <label class="me-field"><span>${SECRET_LABEL}</span>
-          <input id="login-secret" type="password" autocomplete="off" maxlength="50" required />
+          <input id="login-secret" type="password" autocomplete="off" maxlength="50" placeholder="예: 어머니표 김치찌개" required />
         </label>
         ${msg}
         <div class="me-actions">
