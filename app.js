@@ -406,8 +406,8 @@
       const extras = [];
       for (const p of people) {
         const { likes, dislikes } = prefsOf(p);
-        const liked = likes.filter((t) => menu.tags.includes(t));
-        const disliked = dislikes.filter((t) => menu.tags.includes(t));
+        const liked = likes.filter((t) => matchesMenu(menu, t));
+        const disliked = dislikes.filter((t) => matchesMenu(menu, t));
         if (liked.length) ups.push({ who: p.name, tags: liked });
         if (disliked.length) downs.push({ who: p.name, tags: disliked });
       }
@@ -566,13 +566,11 @@
       : `오늘 ${people.length}명: ${people.map((p) => p.name + "님").join(", ")}`;
   }
 
-  function allTags() {
-    const set = new Set();
-    MENUS.forEach((m) => m.tags.forEach((t) => set.add(t)));
-    return [...set];
-  }
+  // 메뉴 이름 자체(예: 마라탕)도 좋아요/싫어요 대상
+  const matchesMenu = (menu, tag) => menu.name === tag || menu.tags.includes(tag);
+  const KNOWN_TAGS = new Set([...MENUS.map((m) => m.name), ...TAG_GROUPS.flatMap((g) => g.tags)]);
 
-  const menusFor = (tags) => MENUS.filter((m) => tags.some((t) => m.tags.includes(t))).map((m) => m.name);
+  const menusFor = (tags) => MENUS.filter((m) => tags.some((t) => matchesMenu(m, t))).map((m) => m.name);
 
   // 가장 최근에 누른 사람의 취향 카드 (+ 취향 수정)
   function renderFocus() {
@@ -635,18 +633,30 @@
 
     if (auth.step === "edit" && me) {
       const d = auth.draft;
-      const chips = allTags().map((t) => {
+      const chip = (t, label) => {
         const cls = d.likes.has(t) ? "up" : d.dislikes.has(t) ? "down" : "";
         const mark = cls === "up" ? "👍 " : cls === "down" ? "👎 " : "";
-        return `<button type="button" class="chip tap ${cls}" data-cycle="${esc(t)}" aria-pressed="${!!cls}">${mark}#${esc(t)}</button>`;
-      }).join("");
+        return `<button type="button" class="chip tap ${cls}" data-cycle="${esc(t)}" aria-pressed="${!!cls}">${mark}${esc(label || t)}</button>`;
+      };
+      // 예전에 고른 태그 중 지금 목록에 없는 것도 지울 수 있게 보여줌
+      const old = [...d.likes, ...d.dislikes].filter((t) => !KNOWN_TAGS.has(t));
+      const groups = [
+        ...TAG_GROUPS.map((g) => ({ name: g.name, items: g.tags.map((t) => chip(t, (t === "고기" || t === "해산물") ? `${t} 전체` : t)) })),
+        { name: "메뉴", items: MENUS.map((m) => chip(m.name, `${m.emoji} ${m.name}`)) },
+        ...(old.length ? [{ name: "예전에 고른 것", items: old.map((t) => chip(t)) }] : []),
+      ];
+      const chips = groups.map((g) => `
+        <div class="tag-group">
+          <div class="tag-group-name">${g.name}</div>
+          <div class="chips">${g.items.join("")}</div>
+        </div>`).join("");
       body.innerHTML = `
         <h2 id="me-title">${esc(me.name)}님의 취향</h2>
         <label class="me-field">주 사무실
           <select id="me-office">${officeOptions(auth.office || me.office)}</select>
         </label>
         <p class="hint tight">한 번 누르면 👍 좋아함, 두 번 누르면 👎 싫어함, 세 번 누르면 해제돼요. 언제든 다시 바꿀 수 있어요.</p>
-        <div class="chips me-chips">${chips}</div>
+        <div class="me-chips">${chips}</div>
         ${msg}
         <div class="me-actions">
           <button type="button" class="primary" data-save-me ${auth.busy ? "disabled" : ""}>저장</button>
