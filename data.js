@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------
 // - 메뉴의 tags 와 사람의 likes / dislikes 가 겹치면 점수가 오르내립니다.
 //   (좋아하는 사람 1명당 +1, 싫어하는 사람 1명당 -1)
-// - 페이지에서 "취향 수정"으로 바꾼 값이 있으면 그 값이 아래 기본값보다 우선합니다.
+// - 사람은 여기에 적지 않고, 각자 페이지의 🔑 로그인에서 직접 가입합니다.
 // - search: 카카오맵에서 찾을 검색어 (없으면 메뉴 이름)
 // - 기분 태그: 가벼움 / 든든 / 빠름,  날씨 태그: 국물(비·추위) / 시원(더위)
 // =====================================================================
@@ -52,19 +52,6 @@ const OFFICES = {
     addressDetail: "13층",
     area: "강남역",                            // 지도 검색어 앞에 붙는 지역명
     location: { lat: 37.4966, lon: 127.0276 }, // 대략 좌표 (카카오맵이 주소로 정확한 좌표를 다시 찾음)
-    people: [
-      { id: "taehyung",  name: "태형", likes: ["라면"],                      dislikes: [] },
-      { id: "seungyeon", name: "승연", likes: ["매운"],                      dislikes: ["돼지국물", "고기"] },
-      { id: "giyoung",   name: "기영", likes: ["팟타이", "카오팟"],          dislikes: ["치킨"] },
-      { id: "jongwon",   name: "종원", likes: ["치킨"],                      dislikes: [] },
-      { id: "heeeun",    name: "희은", likes: [],                            dislikes: [] },
-      { id: "younghyun", name: "영현", likes: ["마라탕", "마라샹궈", "술"],  dislikes: [] },
-      { id: "jaehyung",  name: "재형", likes: ["매운", "마라탕", "마라샹궈"], dislikes: [] },
-      { id: "euna",      name: "은아", likes: ["마라탕"],                    dislikes: [] },
-      { id: "sumin",     name: "수민", likes: ["마라탕"],                    dislikes: [] },
-      { id: "chansaem",  name: "찬샘", likes: [],                            dislikes: ["마라"] },
-      { id: "yohan",     name: "요한", likes: ["술"],                        dislikes: [] },
-    ],
   },
   gwanggyo1: {
     label: "광교1편",
@@ -73,9 +60,6 @@ const OFFICES = {
     addressDetail: "1104호, 광교비즈니스센터",
     area: "광교",
     location: { lat: 37.2899, lon: 127.0506 },
-    people: [
-      { id: "eunjae",    name: "은재", likes: [],                            dislikes: [] },
-    ],
   },
   gwanggyo2: {
     label: "광교2편",
@@ -84,9 +68,6 @@ const OFFICES = {
     addressDetail: "경기도경제과학진흥원 창업보육동 311호",
     area: "광교",
     location: { lat: 37.2945, lon: 127.0456 },
-    people: [
-      { id: "yuna",      name: "윤아", likes: [],                            dislikes: [] },
-    ],
   },
 };
 

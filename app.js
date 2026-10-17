@@ -69,9 +69,9 @@
   // =================================================================
   // 저장소: claude.ai 링크에서는 모두가 공유하는 db, 그 외에는 이 브라우저
   // =================================================================
-  const store = { mode: "connecting", backend: null, prefs: {}, days: {}, restaurants: {}, secrets: {} };
+  const store = { mode: "connecting", backend: null, people: {}, prefs: {}, days: {}, restaurants: {}, secrets: {} };
   // secrets: Supabase가 없을 때만 쓰는 로그인 확인용 (Supabase에서는 서버의 lunch_secrets 표가 대신함)
-  const COLLECTIONS = ["prefs", "days", "restaurants", "secrets"];
+  const COLLECTIONS = ["people", "prefs", "days", "restaurants", "secrets"];
   const SUPABASE_TABLE = "lunch_docs";
   const SUPABASE_SDK_URL = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js";
   let db = null; // claude.ai 링크의 공유 저장소
@@ -95,7 +95,7 @@
   async function refreshFromSupabase(client) {
     const { data, error } = await client.from(SUPABASE_TABLE).select("collection,id,data").limit(10000);
     if (error) throw error;
-    const next = { prefs: {}, days: {}, restaurants: {} };
+    const next = { people: {}, prefs: {}, days: {}, restaurants: {}, secrets: {} };
     (data || []).forEach((row) => {
       if (next[row.collection] && row.data && typeof row.data === "object") next[row.collection][row.id] = row.data;
     });
@@ -179,7 +179,7 @@
     }
     if (store.mode === "local") {
       if (data) store[collection][id] = data; else delete store[collection][id];
-      writeJson(LOCAL_STORE_KEY, { prefs: store.prefs, days: store.days, restaurants: store.restaurants, secrets: store.secrets });
+      writeJson(LOCAL_STORE_KEY, { people: store.people, prefs: store.prefs, days: store.days, restaurants: store.restaurants, secrets: store.secrets });
       render();
       return true;
     }
@@ -214,12 +214,10 @@
 
   const strList = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : null;
 
-  // 페이지에서 수정한 취향이 있으면 그것을, 없으면 data.js 기본값
+  // 각자 로그인해서 저장한 취향
   function prefsOf(p) {
-    const saved = store.prefs[p.id];
-    const likes = saved && strList(saved.likes);
-    const dislikes = saved && strList(saved.dislikes);
-    return likes && dislikes ? { likes, dislikes, edited: true } : { likes: p.likes, dislikes: p.dislikes, edited: false };
+    const saved = p && store.prefs[p.id];
+    return { likes: (saved && strList(saved.likes)) || [], dislikes: (saved && strList(saved.dislikes)) || [] };
   }
 
   // =================================================================
@@ -246,33 +244,67 @@
     return saved.hash === await sha256(`${id}:${secret}`) ? "ok" : "wrong";
   }
 
-  // 비밀번호가 맞으면 취향 저장. register = true(처음 로그인 화면)일 때만 새로 등록
-  async function savePrefsAuthed(id, secret, likes, dislikes, register = false) {
+  // 비밀번호가 맞으면 취향(+ 주 사무실) 저장.
+  // register = true 는 관리자가 비밀번호를 초기화한 뒤 새로 정할 때만
+  async function savePrefsAuthed(id, secret, likes, dislikes, register = false, office = null) {
     if (store.backend === "supabase") {
-      const { data, error } = await sb.rpc("lunch_save_prefs", { p_person: id, p_secret: secret, p_likes: likes, p_dislikes: dislikes, p_register: register });
+      const { data, error } = await sb.rpc("lunch_save_prefs", {
+        p_person: id, p_secret: secret, p_likes: likes, p_dislikes: dislikes, p_register: register, p_office: office,
+      });
       if (error) return "error";
-      if (data === "ok") { store.prefs[id] = { likes, dislikes }; render(); }
+      if (data === "ok") {
+        store.prefs[id] = { likes, dislikes };
+        if (office && store.people[id]) store.people[id] = { ...store.people[id], office };
+        render();
+      }
       return data;
     }
+    if (!store.people[id]) return "invalid";
     const v = await checkSecret(id, secret);
     if (v === "new" && !register) return "new";
     if (v === "new" && !(await write("secrets", id, { hash: await sha256(`${id}:${secret}`) }))) return "error";
     if (v !== "new" && v !== "ok") return v;
+    if (office && store.people[id].office !== office && !(await write("people", id, { ...store.people[id], office }))) return "error";
     return (await write("prefs", id, { likes, dislikes })) ? "ok" : "error";
+  }
+
+  // 가입: 성공하면 새 id, 아니면 "taken" | "invalid" | "error"
+  async function registerPerson(name, office, secret) {
+    if (store.backend === "supabase") {
+      const { data, error } = await sb.rpc("lunch_register", { p_name: name, p_office: office, p_secret: secret });
+      if (error) return "error";
+      if (/^u[0-9a-f]{12}$/.test(data)) {
+        store.people[data] = { name, office };
+        store.prefs[data] = { likes: [], dislikes: [] };
+      }
+      return data;
+    }
+    if (findPersonByName(name)) return "taken";
+    const id = "u" + [...crypto.getRandomValues(new Uint8Array(6))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const ok = await write("people", id, { name, office })
+      && await write("secrets", id, { hash: await sha256(`${id}:${secret}`) })
+      && await write("prefs", id, { likes: [], dislikes: [] });
+    return ok ? id : "error";
   }
 
   const AUTH_MESSAGES = {
     wrong: "좋아하는 음식이 맞지 않아요. 띄어쓰기는 상관없어요.",
     locked: "5번 틀려서 10분 동안 잠겼어요. 잠시 후 다시 해 주세요.",
-    invalid: "입력한 내용을 확인해 주세요. (음식 이름은 50자까지)",
+    invalid: "입력한 내용을 확인해 주세요. (이름은 20자, 음식 이름은 50자까지)",
+    taken: "같은 이름으로 이미 가입한 분이 있어요. 성이나 별명을 붙여 주세요. (예: 박재형)",
     error: "연결에 실패했어요. 잠시 후 다시 해 주세요.",
   };
 
-  const officePeople = () => OFFICES[state.office].people;
-  // 사무실 간 이동이 잦아서 사람은 사무실과 상관없이 전체에서 고름
-  const allPeople = () => Object.entries(OFFICES).flatMap(([office, o]) => o.people.map((p) => ({ ...p, office })));
+  // 가입한 사람들 (사무실 간 이동이 잦아서 사람은 사무실과 상관없이 전체에서 고름)
+  const allPeople = () => Object.entries(store.people)
+    .filter(([, d]) => d && typeof d.name === "string" && d.name.trim())
+    .map(([id, d]) => ({ id, name: d.name.trim(), office: OFFICES[d.office] ? d.office : null }))
+    .sort((x, y) => x.name.localeCompare(y.name, "ko"));
+  const officePeople = () => allPeople().filter((p) => p.office === state.office);
   const personById = (id) => allPeople().find((p) => p.id === id);
-  const colorOf = (id) => AVATAR_COLORS[Math.max(0, allPeople().findIndex((p) => p.id === id)) % AVATAR_COLORS.length];
+  const findPersonByName = (name) => allPeople().find((p) => p.name.toLowerCase() === name.trim().toLowerCase());
+  const officeShort = (key) => (OFFICES[key] ? OFFICES[key].label.replace("편", "") : "");
+  const colorOf = (id) => AVATAR_COLORS[[...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % AVATAR_COLORS.length];
   const selectedPeople = () => allPeople().filter((p) => state.selected.has(p.id));
   const dayId = (date) => `${state.office}_${date}`;
   const todayDoc = () => store.days[dayId(todayKey())] || null;
@@ -492,12 +524,12 @@
   function personCard(p) {
     return `
       <div class="person-wrap">
-        <button class="person${p.special ? " special" : ""}" data-id="${p.id}" aria-pressed="true" title="${p.name}님 취향 보기">
+        <button class="person${p.special ? " special" : ""}" data-id="${p.id}" aria-pressed="true" title="${esc(p.name)}님 취향 보기">
           ${p.special ? specialAvatarSvg() : avatarSvg(colorOf(p.id))}
-          <span class="name">${p.name}님</span>
-          <span class="office-tag">${OFFICES[p.office].label.replace("편", "")}</span>
+          <span class="name">${esc(p.name)}님</span>
+          <span class="office-tag">${officeShort(p.office)}</span>
         </button>
-        <button class="remove" data-remove="${p.id}" aria-label="${p.name}님 빼기">×</button>
+        <button class="remove" data-remove="${p.id}" aria-label="${esc(p.name)}님 빼기">×</button>
       </div>`;
   }
 
@@ -513,12 +545,14 @@
       ? (matches.length
         ? matches.map((p) => {
             const on = state.selected.has(p.id);
-            return `<button class="chip tap ${on ? "active" : ""}" data-pick="${p.id}" aria-pressed="${on}">${on ? "✓ " : "+ "}${p.name}님 <small>${OFFICES[p.office].label.replace("편", "")}</small></button>`;
+            return `<button class="chip tap ${on ? "active" : ""}" data-pick="${p.id}" aria-pressed="${on}">${on ? "✓ " : "+ "}${esc(p.name)}님 <small>${officeShort(p.office)}</small></button>`;
           }).join("")
-        : `<p class="hint tight">'${esc(q)}'(으)로 찾은 사람이 없어요.</p>`)
+        : `<p class="hint tight">'${esc(q)}'(으)로 찾은 사람이 없어요. 아직 가입 전이면 오른쪽 위 🔑 로그인에서 가입할 수 있어요.</p>`)
       : "";
 
-    $("selection-summary").textContent = people.length === 0
+    $("selection-summary").textContent = allPeople().length === 0
+      ? "아직 가입한 사람이 없어요. 오른쪽 위 🔑 로그인에서 이름과 좋아하는 음식으로 가입해 주세요."
+      : people.length === 0
       ? "오늘 같이 먹는 사람을 이름으로 검색해서 추가하세요. 아무도 없으면 모든 메뉴를 기본 순서로 보여줍니다."
       : `오늘 ${people.length}명: ${people.map((p) => p.name + "님").join(", ")}`;
   }
@@ -542,7 +576,7 @@
     const mine = session && session.id === p.id;
     const head = `
       <div class="focus-head">
-        <strong>${p.name}님</strong>
+        <strong>${esc(p.name)}님</strong>
         <span class="focus-state ${on ? "on" : ""}">${on ? "오늘 같이 먹음 ✓" : "빠짐"}</span>
         ${mine
           ? `<button class="ghost small" data-open-me>✏️ 내 취향 수정</button>`
@@ -563,12 +597,13 @@
       ${row("👎 싫어하는 음식", dislikes, "down")}`;
   }
 
-  // 로그인 창 / 내 취향 수정 창
-  const auth = { open: false, step: "login", pickId: "", pending: "", msg: "", busy: false, draft: null };
+  // 로그인·가입 창 / 내 취향 수정 창
+  // step: "login" → (처음이면) "signup" / (비밀번호 초기화됐으면) "reset" → "edit"
+  const auth = { open: false, step: "login", name: "", pickId: "", pending: "", msg: "", busy: false, draft: null, office: "" };
 
   function renderMeButton() {
     const me = session && personById(session.id);
-    $("me-button").textContent = me ? `👤 ${me.name}님 · 내 취향` : "🔑 로그인";
+    $("me-button").textContent = me ? `👤 ${me.name}님 · 내 취향` : "🔑 로그인 / 가입";
   }
 
   function draftFrom(id) {
@@ -576,15 +611,20 @@
     return { likes: new Set(likes), dislikes: new Set(dislikes) };
   }
 
+  const officeOptions = (selected) => Object.entries(OFFICES)
+    .map(([key, o]) => `<option value="${key}" ${selected === key ? "selected" : ""}>${o.label.replace("편", "")}${o.place ? ` (${esc(o.place)})` : ""}</option>`).join("");
+
+  const SECRET_LABEL = `제일 좋아하는 음식 <span class="pw-tag">(비밀번호)</span>`;
+
   function renderMe() {
     renderMeButton();
     $("me-panel").hidden = !auth.open;
     if (!auth.open) return;
     const body = $("me-body");
     const msg = auth.msg ? `<p class="hint tight error" role="alert">${esc(auth.msg)}</p>` : "";
+    const me = session && personById(session.id);
 
-    if (auth.step === "edit" && session) {
-      const me = personById(session.id);
+    if (auth.step === "edit" && me) {
       const d = auth.draft;
       const chips = allTags().map((t) => {
         const cls = d.likes.has(t) ? "up" : d.dislikes.has(t) ? "down" : "";
@@ -592,7 +632,10 @@
         return `<button type="button" class="chip tap ${cls}" data-cycle="${esc(t)}" aria-pressed="${!!cls}">${mark}#${esc(t)}</button>`;
       }).join("");
       body.innerHTML = `
-        <h2 id="me-title">${me.name}님의 취향</h2>
+        <h2 id="me-title">${esc(me.name)}님의 취향</h2>
+        <label class="me-field">주 사무실
+          <select id="me-office">${officeOptions(auth.office || me.office)}</select>
+        </label>
         <p class="hint tight">한 번 누르면 👍 좋아함, 두 번 누르면 👎 싫어함, 세 번 누르면 해제돼요. 언제든 다시 바꿀 수 있어요.</p>
         <div class="chips me-chips">${chips}</div>
         ${msg}
@@ -604,22 +647,37 @@
       return;
     }
 
-    const groups = Object.entries(OFFICES).map(([key, o]) => o.people.length
-      ? `<optgroup label="${o.label}">${o.people.map((p) => `<option value="${p.id}" ${auth.pickId === p.id ? "selected" : ""}>${p.name}</option>`).join("")}</optgroup>`
-      : "").join("");
-
-    if (auth.step === "confirm") {
-      const me = personById(auth.pickId);
+    if (auth.step === "signup") {
       body.innerHTML = `
-        <h2 id="me-title">처음 오셨네요, ${me.name}님!</h2>
-        <p class="hint tight">방금 입력한 음식이 앞으로 비밀번호가 돼요. 확인을 위해 한 번 더 입력해 주세요.</p>
-        <form class="me-form" id="confirm-form">
-          <label class="me-field">제일 좋아하는 음식 (한 번 더)
+        <h2 id="me-title">처음 오셨네요, ${esc(auth.name)}님!</h2>
+        <p class="hint tight">주로 일하는 사무실을 고르고, 방금 입력한 음식을 한 번 더 입력하면 가입이 끝나요. 이 음식이 앞으로 비밀번호가 돼요.</p>
+        <form class="me-form" id="signup-form">
+          <label class="me-field">주 사무실
+            <select id="signup-office">${officeOptions(auth.office || state.office)}</select>
+          </label>
+          <label class="me-field"><span>${SECRET_LABEL} 한 번 더</span>
             <input id="confirm-secret" type="password" autocomplete="off" maxlength="50" required />
           </label>
           ${msg}
           <div class="me-actions">
-            <button class="primary" type="submit" ${auth.busy ? "disabled" : ""}>등록하고 취향 고르기</button>
+            <button class="primary" type="submit" ${auth.busy ? "disabled" : ""}>가입하고 취향 고르기</button>
+            <button type="button" class="ghost" data-back>다시 입력</button>
+          </div>
+        </form>`;
+      return;
+    }
+
+    if (auth.step === "reset") {
+      body.innerHTML = `
+        <h2 id="me-title">${esc(auth.name)}님, 비밀번호를 새로 정해요</h2>
+        <p class="hint tight">관리자가 비밀번호를 초기화했어요. 방금 입력한 음식을 한 번 더 입력하면 새 비밀번호가 돼요.</p>
+        <form class="me-form" id="reset-form">
+          <label class="me-field"><span>${SECRET_LABEL} 한 번 더</span>
+            <input id="confirm-secret" type="password" autocomplete="off" maxlength="50" required />
+          </label>
+          ${msg}
+          <div class="me-actions">
+            <button class="primary" type="submit" ${auth.busy ? "disabled" : ""}>새로 정하기</button>
             <button type="button" class="ghost" data-back>다시 입력</button>
           </div>
         </form>`;
@@ -627,18 +685,19 @@
     }
 
     body.innerHTML = `
-      <h2 id="me-title">로그인</h2>
-      <p class="hint tight">이름을 고르고, 비밀번호 대신 <b>제일 좋아하는 음식</b>을 입력하세요. 처음이면 지금 입력한 음식이 비밀번호가 돼요.</p>
+      <h2 id="me-title">로그인 / 가입</h2>
+      <p class="hint tight">이름과 <b>제일 좋아하는 음식</b>을 입력하세요. 처음이면 바로 가입되고, 이 음식이 비밀번호가 돼요.
+        남들이 맞히기 어려운 음식으로 정해 주세요. (예: 엄마 김치찌개)</p>
       <form class="me-form" id="login-form">
         <label class="me-field">이름
-          <select id="login-name" required><option value="">이름을 고르세요</option>${groups}</select>
+          <input id="login-name" maxlength="20" autocomplete="off" placeholder="예: 박재형" value="${esc(auth.name)}" required />
         </label>
-        <label class="me-field">제일 좋아하는 음식
-          <input id="login-secret" type="password" autocomplete="off" maxlength="50" placeholder="예: 마라탕" required />
+        <label class="me-field"><span>${SECRET_LABEL}</span>
+          <input id="login-secret" type="password" autocomplete="off" maxlength="50" required />
         </label>
         ${msg}
         <div class="me-actions">
-          <button class="primary" type="submit" ${auth.busy ? "disabled" : ""}>로그인</button>
+          <button class="primary" type="submit" ${auth.busy ? "disabled" : ""}>다음</button>
           <button type="button" class="ghost" data-close-me>닫기</button>
         </div>
       </form>`;
@@ -647,15 +706,18 @@
   function openMe(pickId) {
     auth.open = true;
     auth.msg = "";
-    if (session && (!pickId || pickId === session.id)) {
+    const me = session && personById(session.id);
+    if (me && (!pickId || pickId === session.id)) {
       auth.step = "edit";
+      auth.office = me.office || "";
       auth.draft = draftFrom(session.id);
     } else {
       auth.step = "login";
-      auth.pickId = pickId || auth.pickId;
+      const pick = pickId && personById(pickId);
+      if (pick) auth.name = pick.name;
     }
     renderMe();
-    const first = $("me-body").querySelector("select, input, button");
+    const first = $("me-body").querySelector(auth.step === "login" && auth.name ? "#login-secret" : "select, input, button");
     if (first) first.focus();
   }
 
@@ -669,9 +731,12 @@
   function startSession(id, secret) {
     session = { id, secret };
     writeJson(SESSION_KEY, session);
+    const me = personById(id);
     auth.step = "edit";
+    auth.office = (me && me.office) || "";
     auth.draft = draftFrom(id);
     auth.msg = "";
+    auth.pending = "";
   }
 
   function renderConditions() {
@@ -1418,7 +1483,8 @@
     }
     if ("saveMe" in t.dataset && session) {
       auth.busy = true; renderMe();
-      const result = await savePrefsAuthed(session.id, session.secret, [...auth.draft.likes], [...auth.draft.dislikes]);
+      const office = $("me-office") ? $("me-office").value : null;
+      const result = await savePrefsAuthed(session.id, session.secret, [...auth.draft.likes], [...auth.draft.dislikes], false, office);
       auth.busy = false;
       if (result === "ok") {
         toast("내 취향을 저장했어요. 모두의 추천에 바로 반영돼요.");
@@ -1426,7 +1492,7 @@
         render();
         return renderMe();
       }
-      if (result === "wrong" || result === "new") {
+      if (result === "wrong" || result === "new" || result === "invalid") {
         // 관리자가 비밀번호를 초기화했거나 바뀐 경우
         session = null;
         writeJson(SESSION_KEY, null);
@@ -1440,52 +1506,86 @@
     }
   });
 
+  $("me-panel").addEventListener("change", (e) => {
+    if (e.target.id === "me-office" || e.target.id === "signup-office") auth.office = e.target.value;
+  });
+
+  function afterStep() {
+    renderMe();
+    const next = $("me-body").querySelector("#confirm-secret, input");
+    if (next) next.focus();
+  }
+
   $("me-panel").addEventListener("submit", async (e) => {
     e.preventDefault();
     if (auth.busy) return;
+
     if (e.target.id === "login-form") {
-      const id = $("login-name").value;
+      const name = $("login-name").value.trim();
       const secret = normSecret($("login-secret").value);
-      if (!id || !secret) return;
-      auth.pickId = id;
+      if (!name || !secret) return;
+      auth.name = name;
+      auth.msg = "";
+      const person = findPersonByName(name);
+      if (!person) {
+        // 처음 온 사람 → 가입 단계
+        auth.pending = secret;
+        auth.step = "signup";
+        return afterStep();
+      }
+      auth.pickId = person.id;
       auth.busy = true; renderMe();
-      const result = await checkSecret(id, secret);
+      const result = await checkSecret(person.id, secret);
       auth.busy = false;
       if (result === "ok") {
-        startSession(id, secret);
-        toast(`${personById(id).name}님, 반가워요!`);
+        startSession(person.id, secret);
+        toast(`${person.name}님, 반가워요!`);
         render();
       } else if (result === "new") {
         auth.pending = secret;
-        auth.step = "confirm";
-        auth.msg = "";
+        auth.step = "reset";
       } else {
         auth.msg = AUTH_MESSAGES[result] || AUTH_MESSAGES.error;
       }
-      renderMe();
-      const next = $("me-body").querySelector("input");
-      if (next) next.focus();
-      return;
+      return afterStep();
     }
-    if (e.target.id === "confirm-form") {
-      const again = normSecret($("confirm-secret").value);
-      if (again !== auth.pending) {
-        auth.msg = "처음 입력한 음식과 달라요. 다시 입력해 주세요.";
-        return renderMe();
+
+    const again = normSecret($("confirm-secret").value);
+    if (again !== auth.pending) {
+      auth.msg = "처음 입력한 음식과 달라요. 다시 입력해 주세요.";
+      return renderMe();
+    }
+
+    if (e.target.id === "signup-form") {
+      const office = $("signup-office").value;
+      auth.office = office;
+      auth.busy = true; renderMe();
+      const result = await registerPerson(auth.name, office, again);
+      auth.busy = false;
+      if (/^u[0-9a-f]{12}$/.test(result)) {
+        startSession(result, again);
+        toast(`가입했어요, ${auth.name}님! 이제 좋아하는 음식과 싫어하는 음식을 골라 주세요.`);
+        render();
+      } else {
+        auth.msg = AUTH_MESSAGES[result] || AUTH_MESSAGES.error;
+        if (result === "taken") auth.step = "login";
       }
+      return renderMe();
+    }
+
+    if (e.target.id === "reset-form") {
       const { likes, dislikes } = prefsOf(personById(auth.pickId));
       auth.busy = true; renderMe();
       const result = await savePrefsAuthed(auth.pickId, again, likes, dislikes, true);
       auth.busy = false;
       if (result === "ok") {
         startSession(auth.pickId, again);
-        auth.pending = "";
-        toast("등록했어요! 이제 좋아하는 음식과 싫어하는 음식을 골라 주세요.");
+        toast("새 비밀번호로 정했어요.");
         render();
       } else {
         auth.msg = AUTH_MESSAGES[result] || AUTH_MESSAGES.error;
       }
-      renderMe();
+      return renderMe();
     }
   });
 

@@ -291,6 +291,7 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .me-form { display: grid; gap: 12px; }
 .me-field { display: grid; gap: 6px; font-weight: 600; font-size: .9rem; }
 .me-field input, .me-field select { font: inherit; font-weight: 400; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); }
+.pw-tag { font-weight: 500; color: var(--muted); font-size: .82rem; }
 .me-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .me-actions .link-button { margin-left: auto; }
 .me-chips { max-height: 320px; overflow-y: auto; padding: 2px; }
