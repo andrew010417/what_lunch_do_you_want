@@ -308,6 +308,29 @@ button:disabled { opacity: .6; cursor: progress; }
 .credit { text-align: center; color: var(--muted); font-size: .82rem; padding-block: 8px 0; }
 .credit strong { color: var(--text); }
 
+/* ---------- 통계 / 메뉴 요청 ---------- */
+.credit { display: grid; gap: 6px; }
+.credit-links { display: flex; justify-content: center; gap: 8px; align-items: center; }
+.credit-links .link-button { font-size: .88rem; color: var(--brand-dark); }
+.stats-box { width: min(720px, 100%); }
+.stats-box h3 { margin: 8px 0 0; font-size: 1rem; }
+.stats-head { display: flex; align-items: center; justify-content: space-between; }
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.stat-tile { background: var(--soft); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.stat-value { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.stat-label { font-size: .8rem; color: var(--muted); }
+.table-wrap { overflow-x: auto; }
+.stats-table { width: 100%; border-collapse: collapse; font-size: .88rem; font-variant-numeric: tabular-nums; }
+.stats-table th, .stats-table td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.stats-table th { color: var(--muted); font-weight: 600; font-size: .8rem; }
+.stats-table .empty, .request-list .empty { color: var(--muted); white-space: normal; }
+.request-form { display: flex; gap: 6px; }
+.request-form input { flex: 1; min-width: 0; font: inherit; font-size: .9rem; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); }
+.request-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.request-list li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px; border-radius: 8px; background: var(--soft); font-size: .9rem; }
+.request-link { justify-self: start; color: var(--brand-dark); }
+.req-count { color: var(--muted); font-size: .8rem; white-space: nowrap; }
+
 .coming-soon { text-align: center; padding: 60px 20px; }
 .coming-soon .big { font-size: 3rem; }
 .coming-soon p { color: var(--muted); }

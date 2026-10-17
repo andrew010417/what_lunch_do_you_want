@@ -95,7 +95,18 @@
     <p>아직 준비 중이에요. 곧 오픈합니다!</p>
   </main>
 
-  <footer class="credit">제작 · 분석팀 <strong>박재형</strong></footer>
+  <footer class="credit">
+    <div class="credit-links">
+      <button class="link-button" id="open-stats">📊 사용 통계</button>
+      <span aria-hidden="true">·</span>
+      <button class="link-button" id="open-request">🍽 메뉴 추가 요청</button>
+    </div>
+    <div>제작 · 분석팀 <strong>박재형</strong></div>
+  </footer>
+
+  <div class="overlay" id="stats-panel" hidden>
+    <div class="me-box stats-box" role="dialog" aria-modal="true" aria-labelledby="stats-title" id="stats-body"></div>
+  </div>
 
   <div class="overlay" id="roulette" hidden>
     <div class="roulette-box" role="dialog" aria-modal="true" aria-labelledby="roulette-title">

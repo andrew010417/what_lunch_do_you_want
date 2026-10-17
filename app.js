@@ -682,6 +682,7 @@
         </label>
         <p class="hint tight">한 번 누르면 👍 좋아함, 두 번 누르면 👎 싫어함, 세 번 누르면 해제돼요. 언제든 다시 바꿀 수 있어요.</p>
         <div class="me-chips">${chips}</div>
+        <button type="button" class="link-button request-link" data-request>찾는 메뉴가 없나요? 메뉴 추가 요청하기</button>
         ${msg}
         <div class="me-actions">
           <button type="button" class="primary" data-save-me ${auth.busy ? "disabled" : ""}>저장</button>
@@ -1154,6 +1155,140 @@
       : "";
   }
 
+  // =================================================================
+  // 사용 통계 + 메뉴 추가 요청
+  // =================================================================
+  let statsOpen = false;
+
+  function computeStats() {
+    const inLast = (date, n) => typeof date === "string" && daysAgo(date) >= 0 && daysAgo(date) < n;
+    const people = allPeople();
+    const checkins = Object.values(store.checkins).filter((c) => c && OFFICES[c.office] && typeof c.date === "string" && typeof c.person === "string");
+    const meals = Object.values(store.days).filter((d) => d && OFFICES[d.office] && typeof d.menu === "string" && typeof d.date === "string");
+
+    const perOffice = Object.keys(OFFICES).map((key) => {
+      const ci7 = checkins.filter((c) => c.office === key && inLast(c.date, 7));
+      const ci30 = checkins.filter((c) => c.office === key && inLast(c.date, 30));
+      const meals7 = meals.filter((d) => d.office === key && inLast(d.date, 7));
+      const meals30 = meals.filter((d) => d.office === key && inLast(d.date, 30));
+      const days7 = new Set([...ci7.map((c) => c.date), ...meals7.map((d) => d.date)]);
+      const ciDays30 = new Set(ci30.map((c) => c.date));
+      const recorded30 = meals30.filter((d) => ciDays30.has(d.date)).length;
+      return {
+        key,
+        members: people.filter((p) => p.office === key).length,
+        days7: days7.size,
+        avgGroup: ciDays30.size ? ci30.length / ciDays30.size : 0,
+        recordRate: ciDays30.size ? recorded30 / ciDays30.size : null,
+      };
+    });
+
+    const menuCount = new Map();
+    meals.filter((d) => inLast(d.date, 30)).forEach((d) => menuCount.set(d.menu, (menuCount.get(d.menu) || 0) + 1));
+    const ratings = { menus: new Map(), shops: new Map() };
+    meals.forEach((d) => {
+      if (d.rating !== "up" && d.rating !== "down") return;
+      const bump = (map, key) => { const s = map.get(key) || { up: 0, down: 0 }; s[d.rating] += 1; map.set(key, s); };
+      bump(ratings.menus, d.menu);
+      if (typeof d.shop === "string" && d.shop) bump(ratings.shops, `${d.shop}|${d.menu}`);
+    });
+
+    const requests = new Map();
+    Object.values(store.requests).forEach((r) => {
+      if (!r || typeof r.name !== "string" || !r.name.trim()) return;
+      const key = r.name.trim().replace(/\s+/g, " ");
+      const s = requests.get(key.toLowerCase()) || { name: key, count: 0, last: "" };
+      s.count += 1;
+      if (typeof r.at === "string" && r.at > s.last) s.last = r.at;
+      requests.set(key.toLowerCase(), s);
+    });
+
+    return {
+      members: people.length,
+      checkins7: checkins.filter((c) => inLast(c.date, 7)).length,
+      meals30: meals.filter((d) => inLast(d.date, 30)).length,
+      perOffice,
+      topMenus: [...menuCount].sort((x, y) => y[1] - x[1]).slice(0, 5),
+      topShops: [...ratings.shops].map(([k, s]) => ({ shop: k.split("|")[0], menu: k.split("|")[1], ...s }))
+        .filter((s) => s.up > s.down).sort((x, y) => (y.up - y.down) - (x.up - x.down)).slice(0, 5),
+      ratings: ratings.menus,
+      requests: [...requests.values()].sort((x, y) => y.count - x.count || y.last.localeCompare(x.last)),
+    };
+  }
+
+  function renderStats() {
+    $("stats-panel").hidden = !statsOpen;
+    if (!statsOpen) return;
+    const s = computeStats();
+    const pct = (v) => v == null ? "–" : `${Math.round(v * 100)}%`;
+    const emojiOf = (name) => (MENUS.find((m) => m.name === name) || {}).emoji || "🍽";
+    const tiles = [
+      ["가입한 사람", `${s.members}명`],
+      ["최근 7일 출석", `${s.checkins7}회`],
+      ["최근 30일 먹은 기록", `${s.meals30}번`],
+    ].map(([k, v]) => `<div class="stat-tile"><div class="stat-value">${v}</div><div class="stat-label">${k}</div></div>`).join("");
+    const officeRows = s.perOffice.map((o) => `<tr><td>${officeShort(o.key)}</td><td>${o.members}명</td><td>${o.days7}일</td><td>${o.avgGroup ? o.avgGroup.toFixed(1) + "명" : "–"}</td><td>${pct(o.recordRate)}</td></tr>`).join("");
+    const menuRows = s.topMenus.length
+      ? s.topMenus.map(([name, n], i) => `<tr><td>${i + 1}</td><td>${emojiOf(name)} ${esc(name)}</td><td>${n}번</td><td>${ratingText(s.ratings.get(name)) || "–"}</td></tr>`).join("")
+      : `<tr><td colspan="4" class="empty">아직 먹은 기록이 없어요. 점심 후 🍽 버튼으로 기록해 주세요.</td></tr>`;
+    const shopRows = s.topShops.length
+      ? s.topShops.map((x) => `<tr><td>${esc(x.shop)}</td><td>${esc(x.menu)}</td><td>${ratingText(x)}</td></tr>`).join("")
+      : `<tr><td colspan="3" class="empty">아직 가게 평가가 없어요.</td></tr>`;
+    const reqRows = s.requests.length
+      ? s.requests.map((r) => `<li><span>${esc(r.name)}</span><span class="req-count">${r.count}명 요청</span></li>`).join("")
+      : `<li class="empty">아직 요청이 없어요.</li>`;
+
+    $("stats-body").innerHTML = `
+      <div class="stats-head">
+        <h2 id="stats-title">📊 사용 통계</h2>
+        <button class="ghost small" data-close-stats>닫기</button>
+      </div>
+      <div class="stat-tiles">${tiles}</div>
+
+      <h3>사무실별</h3>
+      <div class="table-wrap"><table class="stats-table">
+        <thead><tr><th>사무실</th><th>가입자</th><th>최근 7일 쓴 날</th><th>평균 인원</th><th>먹은 기록 비율</th></tr></thead>
+        <tbody>${officeRows}</tbody>
+      </table></div>
+      <p class="hint tight">평균 인원·기록 비율은 최근 30일 중 출석한 날 기준이에요. 기록 비율은 출석한 날 중 🍽 먹은 기록까지 남긴 날의 비율이에요.</p>
+
+      <h3>인기 메뉴 (최근 30일)</h3>
+      <div class="table-wrap"><table class="stats-table">
+        <thead><tr><th>순위</th><th>메뉴</th><th>먹은 횟수</th><th>평가</th></tr></thead>
+        <tbody>${menuRows}</tbody>
+      </table></div>
+
+      <h3>평가 좋은 가게</h3>
+      <div class="table-wrap"><table class="stats-table">
+        <thead><tr><th>가게</th><th>메뉴</th><th>평가</th></tr></thead>
+        <tbody>${shopRows}</tbody>
+      </table></div>
+
+      <h3 id="requests-title">🍽 메뉴 추가 요청</h3>
+      <p class="hint tight">찾는 메뉴가 없으면 요청해 주세요. 관리자가 보고 메뉴 목록에 추가해요.</p>
+      <form class="request-form" id="request-form">
+        <input id="request-name" maxlength="20" autocomplete="off" placeholder="예: 마라롱샤" required />
+        <button class="primary small" type="submit">요청하기</button>
+      </form>
+      <ul class="request-list">${reqRows}</ul>`;
+  }
+
+  function openStats(focusRequest = false) {
+    statsOpen = true;
+    renderStats();
+    if (focusRequest) {
+      $("requests-title").scrollIntoView({ block: "start" });
+      $("request-name").focus();
+    } else {
+      $("stats-body").querySelector("[data-close-stats]").focus();
+    }
+  }
+
+  function closeStats() {
+    statsOpen = false;
+    renderStats();
+  }
+
   // 상단 안내 띠: 가입 전이면 가입 안내, 로그인했는데 오늘 출석 전이면 출석 안내
   let nudgeClosed = "";
   function renderNudge() {
@@ -1176,6 +1311,13 @@
   function render() {
     renderMeButton();
     renderNudge();
+    if (statsOpen) {
+      const typed = $("request-name") ? $("request-name").value : "";
+      const scroll = $("stats-body").scrollTop;
+      renderStats();
+      $("request-name").value = typed;
+      $("stats-body").scrollTop = scroll;
+    }
     renderTabs();
     renderSync();
     renderOfficeAddress();
@@ -1520,6 +1662,28 @@
     render();
   });
 
+  $("open-stats").addEventListener("click", () => openStats());
+  $("open-request").addEventListener("click", () => openStats(true));
+  $("stats-panel").addEventListener("click", (e) => {
+    if (e.target === $("stats-panel") || e.target.closest("[data-close-stats]")) closeStats();
+  });
+  $("stats-panel").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = $("request-name").value.trim().replace(/\s+/g, " ");
+    if (!name) return;
+    const known = MENUS.find((m) => m.name.replace(/\s/g, "").includes(name.replace(/\s/g, "")));
+    if (known) return toast(`'${known.name}'이(가) 이미 메뉴에 있어요.`);
+    const id = "q" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    if (await write("requests", id, { name, by: session ? session.id : null, at: new Date().toISOString() })) {
+      $("request-name").value = "";
+      toast(`'${name}' 메뉴를 요청했어요. 고마워요!`);
+      renderStats();
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && statsOpen) closeStats();
+  });
+
   $("nudge").addEventListener("click", (e) => {
     const t = e.target.closest("[data-nudge]");
     if (!t) return;
@@ -1557,6 +1721,7 @@
     const t = e.target.closest("button");
     if (!t) return;
     if ("closeMe" in t.dataset) return closeMe();
+    if ("request" in t.dataset) { closeMe(); return openStats(true); }
     if ("back" in t.dataset) { auth.step = "login"; auth.pending = ""; auth.msg = ""; return renderMe(); }
     if ("logout" in t.dataset) {
       session = null;
