@@ -1154,8 +1154,28 @@
       : "";
   }
 
+  // 상단 안내 띠: 가입 전이면 가입 안내, 로그인했는데 오늘 출석 전이면 출석 안내
+  let nudgeClosed = "";
+  function renderNudge() {
+    const box = $("nudge");
+    let kind = "", html = "";
+    if (store.mode !== "connecting" && !(session && personById(session.id))) {
+      kind = "join";
+      html = `<span>👋 <b>처음이세요?</b> 이름과 제일 좋아하는 음식만 있으면 30초 만에 가입하고, 내 취향이 모두의 추천에 반영돼요.</span>
+        <button class="primary small" data-nudge="join">가입하기</button>`;
+    } else if (session && personById(session.id) && !myCheckin()) {
+      kind = "checkin";
+      html = `<span>🍽 오늘 <b>${officeShort(state.office)}</b>에서 점심 드세요? 출석하면 오늘 명단에 들어가요.</span>
+        <button class="primary small" data-nudge="checkin">🙋 출석하기</button>`;
+    }
+    box.hidden = !kind || nudgeClosed === kind;
+    if (!box.hidden) box.innerHTML = `${html}<button class="nudge-close" data-nudge="close" aria-label="안내 닫기">×</button>`;
+    box.dataset.kind = kind;
+  }
+
   function render() {
     renderMeButton();
+    renderNudge();
     renderTabs();
     renderSync();
     renderOfficeAddress();
@@ -1498,6 +1518,15 @@
     state.lastClicked = null;
     toast(`오늘 ${officeShort(state.office)} 명단을 비웠어요.`);
     render();
+  });
+
+  $("nudge").addEventListener("click", (e) => {
+    const t = e.target.closest("[data-nudge]");
+    if (!t) return;
+    if (t.dataset.nudge === "join") return openMe();
+    if (t.dataset.nudge === "checkin") return $("checkin").click();
+    nudgeClosed = $("nudge").dataset.kind;
+    renderNudge();
   });
 
   $("checkin").addEventListener("click", async () => {
