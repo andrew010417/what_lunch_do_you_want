@@ -106,7 +106,9 @@
     if (!supabaseConfigured()) return false;
     try {
       if (!(window.supabase && window.supabase.createClient)) await loadScript(SUPABASE_SDK_URL);
-      const client = window.supabase.createClient(SUPABASE_URL.trim(), SUPABASE_ANON_KEY.trim(), {
+      // "https://xxx.supabase.co/rest/v1/" 처럼 붙여 넣어도 앞부분만 사용
+      const url = SUPABASE_URL.trim().replace(/\/rest\/v1\/?$/, "").replace(/\/+$/, "");
+      const client = window.supabase.createClient(url, SUPABASE_ANON_KEY.trim(), {
         auth: { persistSession: false, autoRefreshToken: false },
       });
       await refreshFromSupabase(client);

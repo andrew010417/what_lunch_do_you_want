@@ -111,5 +111,5 @@ const KAKAO_SEARCH_RADIUS = 1000; // 사무실에서 몇 m 안을 찾을지 (최
 // - 처음 한 번 supabase.sql 을 SQL Editor 에서 실행해야 합니다.
 // - 비워 두면 각자 브라우저에만 저장됩니다.
 // ---------------------------------------------------------------------
-const SUPABASE_URL = "";
-const SUPABASE_ANON_KEY = "";
+const SUPABASE_URL = "https://odpcdblxpepbauvozlbp.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_syadIQAc6eXMLCBUUMQvtw_GlJ_dS5M";
