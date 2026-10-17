@@ -636,7 +636,7 @@
       const chip = (t, label) => {
         const cls = d.likes.has(t) ? "up" : d.dislikes.has(t) ? "down" : "";
         const mark = cls === "up" ? "👍 " : cls === "down" ? "👎 " : "";
-        return `<button type="button" class="chip tap ${cls}" data-cycle="${esc(t)}" aria-pressed="${!!cls}">${mark}${esc(label || t)}</button>`;
+        return `<button type="button" class="chip tap ${cls}" data-cycle="${esc(t)}" data-label="${esc(label || t)}" aria-pressed="${!!cls}">${mark}${esc(label || t)}</button>`;
       };
       // 예전에 고른 태그 중 지금 목록에 없는 것도 지울 수 있게 보여줌
       const old = [...d.likes, ...d.dislikes].filter((t) => !KNOWN_TAGS.has(t));
@@ -1498,7 +1498,13 @@
       if (d.likes.has(tag)) { d.likes.delete(tag); d.dislikes.add(tag); }
       else if (d.dislikes.has(tag)) d.dislikes.delete(tag);
       else d.likes.add(tag);
-      return renderMe();
+      // 창 전체를 다시 그리면 스크롤이 맨 위로 가므로, 누른 버튼만 바꿈
+      const cls = d.likes.has(tag) ? "up" : d.dislikes.has(tag) ? "down" : "";
+      t.classList.remove("up", "down");
+      if (cls) t.classList.add(cls);
+      t.setAttribute("aria-pressed", String(!!cls));
+      t.textContent = `${cls === "up" ? "👍 " : cls === "down" ? "👎 " : ""}${t.dataset.label}`;
+      return;
     }
     if ("saveMe" in t.dataset && session) {
       auth.busy = true; renderMe();
