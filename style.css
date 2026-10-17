@@ -122,6 +122,18 @@ button { font: inherit; cursor: pointer; }
 .person.special[aria-pressed="true"] { border-color: var(--maker); box-shadow: 0 0 0 3px var(--maker-line); }
 .person.special svg { opacity: .8; }
 
+/* ---------- 사람 검색 ---------- */
+.search { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); margin-bottom: 10px; }
+.search:focus-within { border-color: var(--brand-dark); }
+.search input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font: inherit; color: var(--text); }
+.search-results { margin-bottom: 12px; }
+.search-results:empty { display: none; }
+.person-wrap { position: relative; }
+.person-wrap .person { width: 100%; }
+.office-tag { font-size: .7rem; color: var(--muted); }
+.remove { position: absolute; top: 4px; right: 6px; width: 22px; height: 22px; border-radius: 50%; border: none; background: var(--chip); color: var(--muted); font-size: 14px; line-height: 22px; padding: 0; }
+.remove:hover { background: var(--bad); color: var(--card); }
+
 .hint { color: var(--muted); font-size: .88rem; margin: 12px 0 0; }
 
 /* ---------- 메뉴 ---------- */

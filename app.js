@@ -51,6 +51,7 @@
     hideDisliked: !!settings.hideDisliked,
     mood: settings.moodDate === todayKey() && MOODS[settings.mood] ? settings.mood : "any",
     lastClicked: null,
+    query: "",
     editing: null,        // 취향 수정 중인 사람 id
     draft: null,          // { likes: Set, dislikes: Set }
     openShops: new Set(), // 가게 목록을 펼친 메뉴 이름
@@ -221,6 +222,11 @@
   }
 
   const officePeople = () => OFFICES[state.office].people;
+  // 사무실 간 이동이 잦아서 사람은 사무실과 상관없이 전체에서 고름
+  const allPeople = () => Object.entries(OFFICES).flatMap(([office, o]) => o.people.map((p) => ({ ...p, office })));
+  const personById = (id) => allPeople().find((p) => p.id === id);
+  const colorOf = (id) => AVATAR_COLORS[Math.max(0, allPeople().findIndex((p) => p.id === id)) % AVATAR_COLORS.length];
+  const selectedPeople = () => allPeople().filter((p) => state.selected.has(p.id));
   const dayId = (date) => `${state.office}_${date}`;
   const todayDoc = () => store.days[dayId(todayKey())] || null;
 
@@ -300,7 +306,7 @@
   // 점수
   // =================================================================
   function scoreMenus() {
-    const people = officePeople().filter((p) => state.selected.has(p.id));
+    const people = selectedPeople();
     const weather = WEATHERS[currentWeather().kind];
     const mood = MOODS[state.mood];
     const recent = recentEaten();
@@ -435,19 +441,38 @@
     renderMigrate();
   }
 
-  function renderPeople() {
-    const people = officePeople();
-    $("people").innerHTML = people.map((p, i) => `
-      <button class="person${p.special ? " special" : ""}" data-id="${p.id}" aria-pressed="${state.selected.has(p.id)}">
-        <span class="check">✓</span>
-        ${p.special ? specialAvatarSvg() : avatarSvg(AVATAR_COLORS[i % AVATAR_COLORS.length])}
-        <span class="name">${p.name}님</span>
-      </button>`).join("");
+  function personCard(p) {
+    return `
+      <div class="person-wrap">
+        <button class="person${p.special ? " special" : ""}" data-id="${p.id}" aria-pressed="true" title="${p.name}님 취향 보기">
+          ${p.special ? specialAvatarSvg() : avatarSvg(colorOf(p.id))}
+          <span class="name">${p.name}님</span>
+          <span class="office-tag">${OFFICES[p.office].label.replace("편", "")}</span>
+        </button>
+        <button class="remove" data-remove="${p.id}" aria-label="${p.name}님 빼기">×</button>
+      </div>`;
+  }
 
-    const names = people.filter((p) => state.selected.has(p.id)).map((p) => p.name + "님");
-    $("selection-summary").textContent = names.length === 0
-      ? "아무도 선택하지 않으면 모든 메뉴를 기본 순서로 보여줍니다."
-      : `오늘 ${names.length}명: ${names.join(", ")}`;
+  function renderPeople() {
+    const people = selectedPeople();
+    $("people").innerHTML = people.map(personCard).join("");
+    $("people").hidden = people.length === 0;
+
+    // 검색 결과
+    const q = state.query.trim();
+    const matches = q ? allPeople().filter((p) => p.name.includes(q)) : [];
+    $("people-results").innerHTML = q
+      ? (matches.length
+        ? matches.map((p) => {
+            const on = state.selected.has(p.id);
+            return `<button class="chip tap ${on ? "active" : ""}" data-pick="${p.id}" aria-pressed="${on}">${on ? "✓ " : "+ "}${p.name}님 <small>${OFFICES[p.office].label.replace("편", "")}</small></button>`;
+          }).join("")
+        : `<p class="hint tight">'${esc(q)}'(으)로 찾은 사람이 없어요.</p>`)
+      : "";
+
+    $("selection-summary").textContent = people.length === 0
+      ? "오늘 같이 먹는 사람을 이름으로 검색해서 추가하세요. 아무도 없으면 모든 메뉴를 기본 순서로 보여줍니다."
+      : `오늘 ${people.length}명: ${people.map((p) => p.name + "님").join(", ")}`;
   }
 
   function allTags() {
@@ -461,7 +486,7 @@
   // 가장 최근에 누른 사람의 취향 카드 (+ 취향 수정)
   function renderFocus() {
     const box = $("focus");
-    const p = officePeople().find((x) => x.id === state.lastClicked);
+    const p = personById(state.lastClicked);
     box.hidden = !p;
     if (!p) return;
 
@@ -469,7 +494,7 @@
     const head = `
       <div class="focus-head">
         <strong>${p.name}님</strong>
-        <span class="focus-state ${on ? "on" : ""}">${on ? "오늘 출근 ✓" : "선택 해제됨"}</span>
+        <span class="focus-state ${on ? "on" : ""}">${on ? "오늘 같이 먹음 ✓" : "빠짐"}</span>
         ${state.editing === p.id ? "" : `<button class="ghost small" data-edit="${p.id}">✏️ 취향 수정</button>`}
       </div>`;
 
@@ -877,7 +902,7 @@
     renderSync();
     renderOfficeAddress();
     const office = OFFICES[state.office];
-    const ready = office.people.length > 0;
+    const ready = !!office.address;
     $("office-view").hidden = !ready;
     $("coming-soon").hidden = ready;
     if (!ready) {
@@ -1020,14 +1045,55 @@
     if (OFFICES[state.office].location) loadWeather(state.office);
   });
 
-  $("people").addEventListener("click", (e) => {
-    const btn = e.target.closest(".person");
-    if (!btn) return;
-    const id = btn.dataset.id;
-    state.selected.has(id) ? state.selected.delete(id) : state.selected.add(id);
+  function focusOn(id) {
     if (state.lastClicked !== id) { state.editing = null; state.draft = null; }
     state.lastClicked = id;
+  }
+
+  $("people").addEventListener("click", (e) => {
+    const remove = e.target.closest("[data-remove]");
+    if (remove) {
+      state.selected.delete(remove.dataset.remove);
+      saveSelection();
+      return render();
+    }
+    const btn = e.target.closest(".person");
+    if (!btn) return;
+    focusOn(btn.dataset.id);
+    render();
+  });
+
+  function togglePick(id) {
+    state.selected.has(id) ? state.selected.delete(id) : state.selected.add(id);
+    focusOn(id);
     saveSelection();
+  }
+
+  $("people-results").addEventListener("click", (e) => {
+    const t = e.target.closest("[data-pick]");
+    if (!t) return;
+    togglePick(t.dataset.pick);
+    state.query = "";
+    $("people-search").value = "";
+    render();
+    $("people-search").focus();
+  });
+
+  $("people-search").addEventListener("input", (e) => {
+    state.query = e.target.value;
+    renderPeople();
+  });
+
+  // 엔터: 검색 결과 첫 번째 사람 추가
+  $("people-search").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.isComposing) return;
+    e.preventDefault();
+    const q = state.query.trim();
+    const first = q && allPeople().find((p) => p.name.includes(q) && !state.selected.has(p.id));
+    if (!first) return;
+    togglePick(first.id);
+    state.query = "";
+    e.target.value = "";
     render();
   });
 
@@ -1035,7 +1101,7 @@
     const t = e.target.closest("button");
     if (!t) return;
     if (t.dataset.edit) {
-      const p = officePeople().find((x) => x.id === t.dataset.edit);
+      const p = personById(t.dataset.edit);
       const { likes, dislikes } = prefsOf(p);
       state.editing = p.id;
       state.draft = { likes: new Set(likes), dislikes: new Set(dislikes) };
@@ -1181,6 +1247,7 @@
 
   $("select-all").addEventListener("click", () => {
     officePeople().forEach((p) => state.selected.add(p.id));
+    toast(`${OFFICES[state.office].label.replace("편", "")} 사무실 분들을 모두 추가했어요.`);
     saveSelection();
     render();
   });

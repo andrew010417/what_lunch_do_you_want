@@ -12,7 +12,7 @@
     <img class="logo" src="assets/logo.png" alt="BioNexus" />
     <div class="header-text">
       <h1>오늘 점심 뭐 먹지?</h1>
-      <p class="sub">출근한 사람을 체크하면 다같이 좋아하는 메뉴가 위로 올라옵니다</p>
+      <p class="sub">같이 먹는 사람을 검색해서 추가하면 다같이 좋아하는 메뉴가 위로 올라옵니다</p>
     </div>
     <span class="sync" id="sync">연결 중…</span>
   </header>
@@ -24,12 +24,17 @@
   <main id="office-view">
     <section class="card">
       <div class="section-head">
-        <h2>오늘 출근한 사람</h2>
+        <h2>오늘 같이 먹는 사람</h2>
         <div class="actions">
-          <button class="ghost" id="select-all">전체 선택</button>
+          <button class="ghost" id="select-all">이 사무실 사람 모두</button>
           <button class="ghost" id="clear-all">초기화</button>
         </div>
       </div>
+      <label class="search" for="people-search">
+        <span aria-hidden="true">🔍</span>
+        <input id="people-search" type="search" placeholder="이름 검색 (예: 재형) 후 엔터" autocomplete="off" />
+      </label>
+      <div class="chips search-results" id="people-results"></div>
       <div class="people" id="people"></div>
       <p class="hint" id="selection-summary"></p>
       <div class="focus" id="focus" hidden></div>
