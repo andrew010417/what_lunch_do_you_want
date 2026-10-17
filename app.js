@@ -233,11 +233,19 @@
     return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
   }
 
-  // 결과: "new" | "ok" | "wrong" | "locked" | "invalid" | "error"
+  // Supabase 함수 호출 오류 → 화면에 보여줄 결과 코드
+  // 함수를 못 찾음 = supabase.sql 을 최신으로 다시 실행하지 않음
+  function rpcFailure(error) {
+    console.warn("Supabase 함수 호출 실패", error);
+    const text = `${error && error.code} ${error && error.message}`;
+    return /PGRST202|42883|Could not find the function|does not exist/i.test(text) ? "outdated" : "error";
+  }
+
+  // 결과: "new" | "ok" | "wrong" | "locked" | "invalid" | "error" | "outdated"
   async function checkSecret(id, secret) {
     if (store.backend === "supabase") {
       const { data, error } = await sb.rpc("lunch_check_secret", { p_person: id, p_secret: secret });
-      return error ? "error" : data;
+      return error ? rpcFailure(error) : data;
     }
     const saved = store.secrets[id];
     if (!saved || typeof saved.hash !== "string") return "new";
@@ -251,7 +259,7 @@
       const { data, error } = await sb.rpc("lunch_save_prefs", {
         p_person: id, p_secret: secret, p_likes: likes, p_dislikes: dislikes, p_register: register, p_office: office,
       });
-      if (error) return "error";
+      if (error) return rpcFailure(error);
       if (data === "ok") {
         store.prefs[id] = { likes, dislikes };
         if (office && store.people[id]) store.people[id] = { ...store.people[id], office };
@@ -272,7 +280,7 @@
   async function registerPerson(name, office, secret) {
     if (store.backend === "supabase") {
       const { data, error } = await sb.rpc("lunch_register", { p_name: name, p_office: office, p_secret: secret });
-      if (error) return "error";
+      if (error) return rpcFailure(error);
       if (/^u[0-9a-f]{12}$/.test(data)) {
         store.people[data] = { name, office };
         store.prefs[data] = { likes: [], dislikes: [] };
@@ -293,6 +301,7 @@
     invalid: "입력한 내용을 확인해 주세요. (이름은 20자, 음식 이름은 50자까지)",
     taken: "같은 이름으로 이미 가입한 분이 있어요. 성이나 별명을 붙여 주세요. (예: 박재형)",
     error: "연결에 실패했어요. 잠시 후 다시 해 주세요.",
+    outdated: "서버 설정이 최신이 아니에요. 관리자가 Supabase에서 supabase.sql을 다시 실행해야 해요.",
   };
 
   // 가입한 사람들 (사무실 간 이동이 잦아서 사람은 사무실과 상관없이 전체에서 고름)
