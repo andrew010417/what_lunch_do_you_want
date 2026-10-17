@@ -52,8 +52,6 @@
     mood: settings.moodDate === todayKey() && MOODS[settings.mood] ? settings.mood : "any",
     lastClicked: null,
     query: "",
-    editing: null,        // 취향 수정 중인 사람 id
-    draft: null,          // { likes: Set, dislikes: Set }
     openShops: new Set(), // 가게 목록을 펼친 메뉴 이름
     confirmDelete: null,  // 삭제 확인 대기 중인 가게 id
     autoWeather: {},      // 사무실 → undefined: 불러오는 중, "failed", 또는 { kind, temp, rainy }
@@ -71,8 +69,9 @@
   // =================================================================
   // 저장소: claude.ai 링크에서는 모두가 공유하는 db, 그 외에는 이 브라우저
   // =================================================================
-  const store = { mode: "connecting", backend: null, prefs: {}, days: {}, restaurants: {} };
-  const COLLECTIONS = ["prefs", "days", "restaurants"];
+  const store = { mode: "connecting", backend: null, prefs: {}, days: {}, restaurants: {}, secrets: {} };
+  // secrets: Supabase가 없을 때만 쓰는 로그인 확인용 (Supabase에서는 서버의 lunch_secrets 표가 대신함)
+  const COLLECTIONS = ["prefs", "days", "restaurants", "secrets"];
   const SUPABASE_TABLE = "lunch_docs";
   const SUPABASE_SDK_URL = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js";
   let db = null; // claude.ai 링크의 공유 저장소
@@ -178,7 +177,7 @@
     }
     if (store.mode === "local") {
       if (data) store[collection][id] = data; else delete store[collection][id];
-      writeJson(LOCAL_STORE_KEY, { prefs: store.prefs, days: store.days, restaurants: store.restaurants });
+      writeJson(LOCAL_STORE_KEY, { prefs: store.prefs, days: store.days, restaurants: store.restaurants, secrets: store.secrets });
       render();
       return true;
     }
@@ -220,6 +219,52 @@
     const dislikes = saved && strList(saved.dislikes);
     return likes && dislikes ? { likes, dislikes, edited: true } : { likes: p.likes, dislikes: p.dislikes, edited: false };
   }
+
+  // =================================================================
+  // 로그인: 이름 + "제일 좋아하는 음식"(비밀번호)
+  // =================================================================
+  const SESSION_KEY = "bionexus-lunch-session";
+  const normSecret = (s) => String(s || "").replace(/\s+/g, "").toLowerCase();
+  let session = readJson(SESSION_KEY, null); // { id, secret }
+  if (!session || typeof session.id !== "string" || typeof session.secret !== "string") session = null;
+
+  async function sha256(text) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  // 결과: "new" | "ok" | "wrong" | "locked" | "invalid" | "error"
+  async function checkSecret(id, secret) {
+    if (store.backend === "supabase") {
+      const { data, error } = await sb.rpc("lunch_check_secret", { p_person: id, p_secret: secret });
+      return error ? "error" : data;
+    }
+    const saved = store.secrets[id];
+    if (!saved || typeof saved.hash !== "string") return "new";
+    return saved.hash === await sha256(`${id}:${secret}`) ? "ok" : "wrong";
+  }
+
+  // 비밀번호가 맞으면 취향 저장. register = true(처음 로그인 화면)일 때만 새로 등록
+  async function savePrefsAuthed(id, secret, likes, dislikes, register = false) {
+    if (store.backend === "supabase") {
+      const { data, error } = await sb.rpc("lunch_save_prefs", { p_person: id, p_secret: secret, p_likes: likes, p_dislikes: dislikes, p_register: register });
+      if (error) return "error";
+      if (data === "ok") { store.prefs[id] = { likes, dislikes }; render(); }
+      return data;
+    }
+    const v = await checkSecret(id, secret);
+    if (v === "new" && !register) return "new";
+    if (v === "new" && !(await write("secrets", id, { hash: await sha256(`${id}:${secret}`) }))) return "error";
+    if (v !== "new" && v !== "ok") return v;
+    return (await write("prefs", id, { likes, dislikes })) ? "ok" : "error";
+  }
+
+  const AUTH_MESSAGES = {
+    wrong: "좋아하는 음식이 맞지 않아요. 띄어쓰기는 상관없어요.",
+    locked: "5번 틀려서 10분 동안 잠겼어요. 잠시 후 다시 해 주세요.",
+    invalid: "입력한 내용을 확인해 주세요. (음식 이름은 50자까지)",
+    error: "연결에 실패했어요. 잠시 후 다시 해 주세요.",
+  };
 
   const officePeople = () => OFFICES[state.office].people;
   // 사무실 간 이동이 잦아서 사람은 사무실과 상관없이 전체에서 고름
@@ -401,7 +446,8 @@
     if (store.backend !== "supabase") return [];
     const saved = readJson(LOCAL_STORE_KEY, {});
     const rows = [];
-    COLLECTIONS.forEach((c) => {
+    // 취향은 로그인해야만 바뀌므로 옮기지 않음
+    ["days", "restaurants"].forEach((c) => {
       Object.entries(saved[c] && typeof saved[c] === "object" ? saved[c] : {}).forEach(([id, data]) => {
         if (data && typeof data === "object" && !store[c][id]) rows.push({ collection: c, id, data });
       });
@@ -491,29 +537,15 @@
     if (!p) return;
 
     const on = state.selected.has(p.id);
+    const mine = session && session.id === p.id;
     const head = `
       <div class="focus-head">
         <strong>${p.name}님</strong>
         <span class="focus-state ${on ? "on" : ""}">${on ? "오늘 같이 먹음 ✓" : "빠짐"}</span>
-        ${state.editing === p.id ? "" : `<button class="ghost small" data-edit="${p.id}">✏️ 취향 수정</button>`}
+        ${mine
+          ? `<button class="ghost small" data-open-me>✏️ 내 취향 수정</button>`
+          : `<button class="ghost small" data-login-as="${p.id}" title="본인만 수정할 수 있어요">🔑 본인이면 로그인</button>`}
       </div>`;
-
-    if (state.editing === p.id) {
-      const d = state.draft;
-      const chips = allTags().map((t) => {
-        const cls = d.likes.has(t) ? "up" : d.dislikes.has(t) ? "down" : "";
-        const mark = cls === "up" ? "👍 " : cls === "down" ? "👎 " : "";
-        return `<button class="chip tap ${cls}" data-cycle="${esc(t)}" aria-pressed="${!!cls}">${mark}#${esc(t)}</button>`;
-      }).join("");
-      box.innerHTML = `${head}
-        <p class="hint tight">태그를 한 번 누르면 👍 좋아함, 두 번 누르면 👎 싫어함, 세 번 누르면 해제돼요.</p>
-        <div class="chips">${chips}</div>
-        <div class="actions">
-          <button class="primary" data-save-prefs="${p.id}">저장</button>
-          <button class="ghost" data-cancel-edit>취소</button>
-        </div>`;
-      return;
-    }
 
     const { likes, dislikes } = prefsOf(p);
     const chips = (tags, cls) => tags.map((t) => `<span class="chip ${cls}">#${esc(t)}</span>`).join("");
@@ -527,6 +559,117 @@
     box.innerHTML = `${head}
       ${row("👍 좋아하는 음식", likes, "up")}
       ${row("👎 싫어하는 음식", dislikes, "down")}`;
+  }
+
+  // 로그인 창 / 내 취향 수정 창
+  const auth = { open: false, step: "login", pickId: "", pending: "", msg: "", busy: false, draft: null };
+
+  function renderMeButton() {
+    const me = session && personById(session.id);
+    $("me-button").textContent = me ? `👤 ${me.name}님 · 내 취향` : "🔑 로그인";
+  }
+
+  function draftFrom(id) {
+    const { likes, dislikes } = prefsOf(personById(id));
+    return { likes: new Set(likes), dislikes: new Set(dislikes) };
+  }
+
+  function renderMe() {
+    renderMeButton();
+    $("me-panel").hidden = !auth.open;
+    if (!auth.open) return;
+    const body = $("me-body");
+    const msg = auth.msg ? `<p class="hint tight error" role="alert">${esc(auth.msg)}</p>` : "";
+
+    if (auth.step === "edit" && session) {
+      const me = personById(session.id);
+      const d = auth.draft;
+      const chips = allTags().map((t) => {
+        const cls = d.likes.has(t) ? "up" : d.dislikes.has(t) ? "down" : "";
+        const mark = cls === "up" ? "👍 " : cls === "down" ? "👎 " : "";
+        return `<button type="button" class="chip tap ${cls}" data-cycle="${esc(t)}" aria-pressed="${!!cls}">${mark}#${esc(t)}</button>`;
+      }).join("");
+      body.innerHTML = `
+        <h2 id="me-title">${me.name}님의 취향</h2>
+        <p class="hint tight">한 번 누르면 👍 좋아함, 두 번 누르면 👎 싫어함, 세 번 누르면 해제돼요. 언제든 다시 바꿀 수 있어요.</p>
+        <div class="chips me-chips">${chips}</div>
+        ${msg}
+        <div class="me-actions">
+          <button type="button" class="primary" data-save-me ${auth.busy ? "disabled" : ""}>저장</button>
+          <button type="button" class="ghost" data-close-me>닫기</button>
+          <button type="button" class="link-button" data-logout>로그아웃</button>
+        </div>`;
+      return;
+    }
+
+    const groups = Object.entries(OFFICES).map(([key, o]) => o.people.length
+      ? `<optgroup label="${o.label}">${o.people.map((p) => `<option value="${p.id}" ${auth.pickId === p.id ? "selected" : ""}>${p.name}</option>`).join("")}</optgroup>`
+      : "").join("");
+
+    if (auth.step === "confirm") {
+      const me = personById(auth.pickId);
+      body.innerHTML = `
+        <h2 id="me-title">처음 오셨네요, ${me.name}님!</h2>
+        <p class="hint tight">방금 입력한 음식이 앞으로 비밀번호가 돼요. 확인을 위해 한 번 더 입력해 주세요.</p>
+        <form class="me-form" id="confirm-form">
+          <label class="me-field">제일 좋아하는 음식 (한 번 더)
+            <input id="confirm-secret" type="password" autocomplete="off" maxlength="50" required />
+          </label>
+          ${msg}
+          <div class="me-actions">
+            <button class="primary" type="submit" ${auth.busy ? "disabled" : ""}>등록하고 취향 고르기</button>
+            <button type="button" class="ghost" data-back>다시 입력</button>
+          </div>
+        </form>`;
+      return;
+    }
+
+    body.innerHTML = `
+      <h2 id="me-title">로그인</h2>
+      <p class="hint tight">이름을 고르고, 비밀번호 대신 <b>제일 좋아하는 음식</b>을 입력하세요. 처음이면 지금 입력한 음식이 비밀번호가 돼요.</p>
+      <form class="me-form" id="login-form">
+        <label class="me-field">이름
+          <select id="login-name" required><option value="">이름을 고르세요</option>${groups}</select>
+        </label>
+        <label class="me-field">제일 좋아하는 음식
+          <input id="login-secret" type="password" autocomplete="off" maxlength="50" placeholder="예: 마라탕" required />
+        </label>
+        ${msg}
+        <div class="me-actions">
+          <button class="primary" type="submit" ${auth.busy ? "disabled" : ""}>로그인</button>
+          <button type="button" class="ghost" data-close-me>닫기</button>
+        </div>
+      </form>`;
+  }
+
+  function openMe(pickId) {
+    auth.open = true;
+    auth.msg = "";
+    if (session && (!pickId || pickId === session.id)) {
+      auth.step = "edit";
+      auth.draft = draftFrom(session.id);
+    } else {
+      auth.step = "login";
+      auth.pickId = pickId || auth.pickId;
+    }
+    renderMe();
+    const first = $("me-body").querySelector("select, input, button");
+    if (first) first.focus();
+  }
+
+  function closeMe() {
+    auth.open = false;
+    auth.pending = "";
+    renderMe();
+    $("me-button").focus();
+  }
+
+  function startSession(id, secret) {
+    session = { id, secret };
+    writeJson(SESSION_KEY, session);
+    auth.step = "edit";
+    auth.draft = draftFrom(id);
+    auth.msg = "";
   }
 
   function renderConditions() {
@@ -898,6 +1041,7 @@
   }
 
   function render() {
+    renderMeButton();
     renderTabs();
     renderSync();
     renderOfficeAddress();
@@ -1046,7 +1190,6 @@
   });
 
   function focusOn(id) {
-    if (state.lastClicked !== id) { state.editing = null; state.draft = null; }
     state.lastClicked = id;
   }
 
@@ -1097,34 +1240,11 @@
     render();
   });
 
-  $("focus").addEventListener("click", async (e) => {
+  $("focus").addEventListener("click", (e) => {
     const t = e.target.closest("button");
     if (!t) return;
-    if (t.dataset.edit) {
-      const p = personById(t.dataset.edit);
-      const { likes, dislikes } = prefsOf(p);
-      state.editing = p.id;
-      state.draft = { likes: new Set(likes), dislikes: new Set(dislikes) };
-    } else if (t.dataset.cycle) {
-      const tag = t.dataset.cycle;
-      const d = state.draft;
-      if (d.likes.has(tag)) { d.likes.delete(tag); d.dislikes.add(tag); }
-      else if (d.dislikes.has(tag)) d.dislikes.delete(tag);
-      else d.likes.add(tag);
-    } else if (t.dataset.savePrefs) {
-      const id = t.dataset.savePrefs;
-      const ok = await write("prefs", id, { likes: [...state.draft.likes], dislikes: [...state.draft.dislikes] });
-      if (!ok) return;
-      state.editing = null;
-      state.draft = null;
-      toast("취향을 저장했어요.");
-    } else if ("cancelEdit" in t.dataset) {
-      state.editing = null;
-      state.draft = null;
-    } else {
-      return;
-    }
-    render();
+    if ("openMe" in t.dataset) openMe();
+    if (t.dataset.loginAs) openMe(t.dataset.loginAs);
   });
 
   $("weather-chips").addEventListener("click", (e) => {
@@ -1255,8 +1375,6 @@
   $("clear-all").addEventListener("click", () => {
     state.selected.clear();
     state.lastClicked = null;
-    state.editing = null;
-    state.draft = null;
     saveSelection();
     render();
   });
@@ -1270,6 +1388,107 @@
   $("migrate").addEventListener("click", (e) => {
     if (e.target.closest("[data-migrate]")) migrateLocal();
     if (e.target.closest("[data-migrate-skip]")) { writeJson(LOCAL_STORE_KEY, {}); render(); }
+  });
+
+  $("me-button").addEventListener("click", () => openMe());
+
+  $("me-panel").addEventListener("click", async (e) => {
+    if (e.target === $("me-panel")) return closeMe();
+    const t = e.target.closest("button");
+    if (!t) return;
+    if ("closeMe" in t.dataset) return closeMe();
+    if ("back" in t.dataset) { auth.step = "login"; auth.pending = ""; auth.msg = ""; return renderMe(); }
+    if ("logout" in t.dataset) {
+      session = null;
+      writeJson(SESSION_KEY, null);
+      auth.step = "login";
+      auth.msg = "";
+      toast("로그아웃했어요.");
+      render();
+      return renderMe();
+    }
+    if (t.dataset.cycle) {
+      const tag = t.dataset.cycle, d = auth.draft;
+      if (d.likes.has(tag)) { d.likes.delete(tag); d.dislikes.add(tag); }
+      else if (d.dislikes.has(tag)) d.dislikes.delete(tag);
+      else d.likes.add(tag);
+      return renderMe();
+    }
+    if ("saveMe" in t.dataset && session) {
+      auth.busy = true; renderMe();
+      const result = await savePrefsAuthed(session.id, session.secret, [...auth.draft.likes], [...auth.draft.dislikes]);
+      auth.busy = false;
+      if (result === "ok") {
+        toast("내 취향을 저장했어요. 모두의 추천에 바로 반영돼요.");
+        auth.open = false;
+        render();
+        return renderMe();
+      }
+      if (result === "wrong" || result === "new") {
+        // 관리자가 비밀번호를 초기화했거나 바뀐 경우
+        session = null;
+        writeJson(SESSION_KEY, null);
+        auth.step = "login";
+        auth.msg = "로그인이 풀렸어요. 다시 로그인해 주세요.";
+        render();
+        return renderMe();
+      }
+      auth.msg = AUTH_MESSAGES[result] || AUTH_MESSAGES.error;
+      renderMe();
+    }
+  });
+
+  $("me-panel").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (auth.busy) return;
+    if (e.target.id === "login-form") {
+      const id = $("login-name").value;
+      const secret = normSecret($("login-secret").value);
+      if (!id || !secret) return;
+      auth.pickId = id;
+      auth.busy = true; renderMe();
+      const result = await checkSecret(id, secret);
+      auth.busy = false;
+      if (result === "ok") {
+        startSession(id, secret);
+        toast(`${personById(id).name}님, 반가워요!`);
+        render();
+      } else if (result === "new") {
+        auth.pending = secret;
+        auth.step = "confirm";
+        auth.msg = "";
+      } else {
+        auth.msg = AUTH_MESSAGES[result] || AUTH_MESSAGES.error;
+      }
+      renderMe();
+      const next = $("me-body").querySelector("input");
+      if (next) next.focus();
+      return;
+    }
+    if (e.target.id === "confirm-form") {
+      const again = normSecret($("confirm-secret").value);
+      if (again !== auth.pending) {
+        auth.msg = "처음 입력한 음식과 달라요. 다시 입력해 주세요.";
+        return renderMe();
+      }
+      const { likes, dislikes } = prefsOf(personById(auth.pickId));
+      auth.busy = true; renderMe();
+      const result = await savePrefsAuthed(auth.pickId, again, likes, dislikes, true);
+      auth.busy = false;
+      if (result === "ok") {
+        startSession(auth.pickId, again);
+        auth.pending = "";
+        toast("등록했어요! 이제 좋아하는 음식과 싫어하는 음식을 골라 주세요.");
+        render();
+      } else {
+        auth.msg = AUTH_MESSAGES[result] || AUTH_MESSAGES.error;
+      }
+      renderMe();
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && auth.open) closeMe();
   });
 
   $("pick").addEventListener("click", openRoulette);

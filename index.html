@@ -14,7 +14,10 @@
       <h1>오늘 점심 뭐 먹지?</h1>
       <p class="sub">같이 먹는 사람을 검색해서 추가하면 다같이 좋아하는 메뉴가 위로 올라옵니다</p>
     </div>
-    <span class="sync" id="sync">연결 중…</span>
+    <div class="header-side">
+      <button class="me-button" id="me-button">🔑 로그인</button>
+      <span class="sync" id="sync">연결 중…</span>
+    </div>
   </header>
 
   <nav class="tabs" id="tabs" role="tablist"></nav>
@@ -104,6 +107,10 @@
         <button class="ghost" id="roulette-close">닫기</button>
       </div>
     </div>
+  </div>
+
+  <div class="overlay" id="me-panel" hidden>
+    <div class="me-box" role="dialog" aria-modal="true" aria-labelledby="me-title" id="me-body"></div>
   </div>
 
   <div class="toast" id="toast" role="status" hidden></div>
