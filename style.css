@@ -17,6 +17,7 @@
   --bad-bg: #fef2f2;
   --bad-line: #fecaca;
   --maker: #b45309;
+  --star: #f59e0b;
   --maker-bg: #fff7e0;
   --maker-line: #fcd34d;
 }
@@ -279,6 +280,18 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .pin.office { background: var(--bad); font-size: 12px; padding: 0 8px; }
 .pin-no { flex-shrink: 0; width: 22px; height: 22px; line-height: 22px; border-radius: 50%; background: var(--brand-dark); color: var(--card); font-size: .75rem; font-weight: 700; text-align: center; }
 .review-link { font-size: .8rem; color: var(--brand-dark); }
+/* ---------- 별점 ---------- */
+.stars { display: inline-flex; gap: 2px; }
+.star { position: relative; display: inline-block; width: 26px; height: 26px; font-size: 26px; line-height: 26px; }
+.star::before { content: "★"; position: absolute; inset: 0; text-align: center; color: var(--line); }
+.star.s-full::before { color: var(--star); }
+.star.s-half::before { background: linear-gradient(90deg, var(--star) 50%, var(--line) 50%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.star-half { position: absolute; top: 0; bottom: 0; width: 50%; border: none; background: transparent; padding: 0; cursor: pointer; z-index: 1; }
+.star-half.left { left: 0; }
+.star-half.right { right: 0; }
+.star-half:focus-visible { outline: 2px solid var(--brand-dark); outline-offset: -2px; border-radius: 4px; }
+.star-value { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; min-width: 2.2em; }
+.star-avg { font-size: .82rem; color: var(--muted); }
 .today-field { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: .88rem; color: var(--muted); }
 .today-field select { font: inherit; font-size: .88rem; padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); max-width: 100%; }
 

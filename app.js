@@ -63,9 +63,9 @@
   // =================================================================
   // 저장소: claude.ai 링크에서는 모두가 공유하는 db, 그 외에는 이 브라우저
   // =================================================================
-  const store = { mode: "connecting", backend: null, people: {}, prefs: {}, days: {}, restaurants: {}, checkins: {}, requests: {}, secrets: {} };
+  const store = { mode: "connecting", backend: null, people: {}, prefs: {}, days: {}, restaurants: {}, checkins: {}, requests: {}, ratings: {}, secrets: {} };
   // secrets: Supabase가 없을 때만 쓰는 로그인 확인용 (Supabase에서는 서버의 lunch_secrets 표가 대신함)
-  const COLLECTIONS = ["people", "prefs", "days", "restaurants", "checkins", "requests", "secrets"];
+  const COLLECTIONS = ["people", "prefs", "days", "restaurants", "checkins", "requests", "ratings", "secrets"];
   const SUPABASE_TABLE = "lunch_docs";
   const SUPABASE_SDK_URL = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js";
   let db = null; // claude.ai 링크의 공유 저장소
@@ -346,25 +346,53 @@
     return map;
   }
 
-  // 우리가 남긴 평가 집계: 메뉴별 / "메뉴|가게"별 { up, down }
-  function ratingStats() {
+  // 별점: 사람마다 하루 한 줄(rt_날짜_사람id). 무슨 메뉴·가게였는지는 그날 먹은 기록(days)에서 가져옴
+  const ratingId = (personId, date = todayKey()) => `rt_${date}_${personId}`;
+  const validStars = (v) => typeof v === "number" && v >= 0.5 && v <= 5 && Math.round(v * 2) === v * 2;
+
+  // 별점 집계: 메뉴별 / "메뉴|가게"별 { sum, count }. office 가 null 이면 모든 사무실
+  function ratingStats(office = state.office) {
     const menus = new Map();
     const shops = new Map();
-    const add = (map, key, rating) => {
-      const s = map.get(key) || { up: 0, down: 0 };
-      s[rating] += 1;
+    const add = (map, key, v) => {
+      const s = map.get(key) || { sum: 0, count: 0 };
+      s.sum += v;
+      s.count += 1;
       map.set(key, s);
     };
-    Object.values(store.days).forEach((d) => {
-      if (!d || d.office !== state.office || typeof d.menu !== "string") return;
+    const starred = new Set();
+    Object.values(store.ratings).forEach((r) => {
+      if (!r || !validStars(r.stars) || (office && r.office !== office)) return;
+      const d = store.days[`${r.office}_${r.date}`];
+      if (!d || typeof d.menu !== "string") return;
+      add(menus, d.menu, r.stars);
+      if (typeof d.shop === "string" && d.shop) add(shops, `${d.menu}|${d.shop}`, r.stars);
+      starred.add(`${r.office}_${r.date}`);
+    });
+    // 별점 이전의 👍/👎 기록도 반영 (👍 = 5점, 👎 = 1점)
+    Object.entries(store.days).forEach(([id, d]) => {
+      if (!d || (office && d.office !== office) || typeof d.menu !== "string" || starred.has(id)) return;
       if (d.rating !== "up" && d.rating !== "down") return;
-      add(menus, d.menu, d.rating);
-      if (typeof d.shop === "string" && d.shop) add(shops, `${d.menu}|${d.shop}`, d.rating);
+      const v = d.rating === "up" ? 5 : 1;
+      add(menus, d.menu, v);
+      if (typeof d.shop === "string" && d.shop) add(shops, `${d.menu}|${d.shop}`, v);
     });
     return { menus, shops };
   }
 
-  const ratingText = (s) => s ? `${s.up ? `👍${s.up}` : ""}${s.up && s.down ? " " : ""}${s.down ? `👎${s.down}` : ""}` : "";
+  const avgOf = (s) => (s && s.count ? s.sum / s.count : 0);
+  const ratingText = (s) => (s && s.count ? `★${avgOf(s).toFixed(1)} (${s.count}명)` : "");
+
+  // 0.5점 단위 별 5개 (각 별의 왼쪽 반 = .5, 오른쪽 반 = 정수)
+  function starsHtml(value, interactive) {
+    return [1, 2, 3, 4, 5].map((n) => {
+      const cls = value >= n ? "s-full" : value >= n - 0.5 ? "s-half" : "s-empty";
+      const halves = interactive
+        ? `<button type="button" class="star-half left" data-stars="${n - 0.5}" aria-label="${n - 0.5}점"></button><button type="button" class="star-half right" data-stars="${n}" aria-label="${n}점"></button>`
+        : "";
+      return `<span class="star ${cls}" aria-hidden="${interactive ? "false" : "true"}">${halves}</span>`;
+    }).join("");
+  }
 
   // =================================================================
   // 날씨
@@ -426,13 +454,13 @@
       if (mood.tag && menu.tags.includes(mood.tag)) extras.push({ text: mood.label, delta: 1 });
       if (recent.has(menu.name)) extras.push({ text: `🕒 ${recent.get(menu.name)}일 전에 먹음`, delta: -1 });
       const rs = ratings.get(menu.name);
-      if (rs && rs.up !== rs.down) {
-        extras.push(rs.up > rs.down
-          ? { text: `⭐ 우리 평가 좋음 (${ratingText(rs)})`, delta: 1 }
-          : { text: `⭐ 우리 평가 별로 (${ratingText(rs)})`, delta: -1 });
+      if (rs && rs.count) {
+        const avg = avgOf(rs);
+        if (avg >= 4) extras.push({ text: `⭐ 우리 별점 ${avg.toFixed(1)}점`, delta: 1 });
+        else if (avg <= 2.5) extras.push({ text: `⭐ 우리 별점 ${avg.toFixed(1)}점`, delta: -1 });
       }
 
-      // 좋아하는 사람 1명당 +1, 싫어하는 사람 1명당 -1, 날씨·기분 +1, 최근 먹음 -1, 우리 평가 ±1
+      // 좋아하는 사람 1명당 +1, 싫어하는 사람 1명당 -1, 날씨·기분 +1, 최근 먹음 -1, 별점 4점 이상 +1 / 2.5점 이하 -1
       const score = ups.length - downs.length + extras.reduce((s, x) => s + x.delta, 0);
       return { ...menu, index, score, ups, downs, extras };
     }).sort((a, b) => b.score - a.score || a.index - b.index);
@@ -787,6 +815,28 @@
     auth.pending = "";
   }
 
+  // 그 사무실·날짜에 남긴 별점들의 평균
+  function dayAverage(office, date) {
+    const list = Object.values(store.ratings).filter((r) => r && r.office === office && r.date === date && validStars(r.stars));
+    return list.length ? { avg: list.reduce((s, r) => s + r.stars, 0) / list.length, count: list.length } : null;
+  }
+
+  function starPicker() {
+    const mine = session && store.ratings[ratingId(session.id)];
+    const value = mine && validStars(mine.stars) ? mine.stars : 0;
+    const avg = dayAverage(state.office, todayKey());
+    const summary = avg ? `<span class="star-avg">오늘 평균 ★${avg.avg.toFixed(1)} (${avg.count}명)</span>` : "";
+    if (!session) {
+      return `<span class="today-field">별점 <button class="link-button" data-star-login>로그인하고 별점 남기기</button> ${summary}</span>`;
+    }
+    return `<span class="today-field">내 별점
+        <span class="stars" role="group" aria-label="별점 0.5점 단위, 5점 만점">${starsHtml(value, true)}</span>
+        <span class="star-value">${value ? value.toFixed(1) : "–"}</span>
+        ${value ? `<button class="link-button" data-stars="0">지우기</button>` : ""}
+        ${summary}
+      </span>`;
+  }
+
   function renderConditions() {
     const w = currentWeather();
     const day = todayDoc();
@@ -834,20 +884,18 @@
         <div class="today-eaten">
           <span>오늘: ${emojiOf(day.menu)} <strong>${esc(day.menu)}</strong> 먹음</span>
           ${shopPicker}
-          <span class="today-field">어땠어요?
-            <button class="chip tap ${day.rating === "up" ? "active" : ""}" data-rate="up" aria-pressed="${day.rating === "up"}">👍 맛있었어요</button>
-            <button class="chip tap ${day.rating === "down" ? "active" : ""}" data-rate="down" aria-pressed="${day.rating === "down"}">👎 별로였어요</button>
-          </span>
+          ${starPicker()}
           <button class="ghost small" data-eat="${esc(day.menu)}">기록 취소</button>
         </div>`;
     } else {
       today = `<p class="hint tight">점심을 먹은 뒤 메뉴 옆 🍽 버튼을 누르면 기록돼요. 기록한 메뉴는 ${RECENT_DAYS}일 동안 순위가 1점 내려가고,
-        👍/👎 평가를 남기면 다음 추천에 반영돼요.</p>`;
+        각자 남긴 ⭐ 별점은 다음 추천에 반영돼요.</p>`;
     }
     const list = past.length
       ? `<div class="chips">${past.map((d) => {
           const [, m, dd] = d.date.split("-");
-          const rate = d.rating === "up" ? " 👍" : d.rating === "down" ? " 👎" : "";
+          const avg = dayAverage(d.office, d.date);
+          const rate = avg ? ` ★${avg.avg.toFixed(1)}` : d.rating === "up" ? " 👍" : d.rating === "down" ? " 👎" : "";
           const shop = typeof d.shop === "string" && d.shop ? ` · ${esc(d.shop)}` : "";
           return `<span class="chip">${Number(m)}/${Number(dd)} ${emojiOf(d.menu)} ${esc(d.menu)}${shop}${rate} <small>(${d.ago}일 전)</small></span>`;
         }).join("")}</div>`
@@ -1185,13 +1233,7 @@
 
     const menuCount = new Map();
     meals.filter((d) => inLast(d.date, 30)).forEach((d) => menuCount.set(d.menu, (menuCount.get(d.menu) || 0) + 1));
-    const ratings = { menus: new Map(), shops: new Map() };
-    meals.forEach((d) => {
-      if (d.rating !== "up" && d.rating !== "down") return;
-      const bump = (map, key) => { const s = map.get(key) || { up: 0, down: 0 }; s[d.rating] += 1; map.set(key, s); };
-      bump(ratings.menus, d.menu);
-      if (typeof d.shop === "string" && d.shop) bump(ratings.shops, `${d.shop}|${d.menu}`);
-    });
+    const ratings = ratingStats(null);
 
     const requests = new Map();
     Object.values(store.requests).forEach((r) => {
@@ -1209,8 +1251,8 @@
       meals30: meals.filter((d) => inLast(d.date, 30)).length,
       perOffice,
       topMenus: [...menuCount].sort((x, y) => y[1] - x[1]).slice(0, 5),
-      topShops: [...ratings.shops].map(([k, s]) => ({ shop: k.split("|")[0], menu: k.split("|")[1], ...s }))
-        .filter((s) => s.up > s.down).sort((x, y) => (y.up - y.down) - (x.up - x.down)).slice(0, 5),
+      topShops: [...ratings.shops].map(([k, s]) => ({ menu: k.split("|")[0], shop: k.split("|").slice(1).join("|"), ...s }))
+        .filter((s) => avgOf(s) >= 3.5).sort((x, y) => avgOf(y) - avgOf(x) || y.count - x.count).slice(0, 5),
       ratings: ratings.menus,
       requests: [...requests.values()].sort((x, y) => y.count - x.count || y.last.localeCompare(x.last)),
     };
@@ -1540,17 +1582,27 @@
     const undo = day && day.menu === name;
     const changed = !day || day.menu !== name;
     const ok = await updateToday(undo || changed ? { menu: undo ? null : name, shop: null, rating: null } : { menu: name });
+    // 먹은 메뉴가 바뀌면 그 메뉴에 남긴 오늘 별점은 지움
+    if (ok && day && day.menu && (undo || changed)) {
+      for (const [rid, r] of Object.entries(store.ratings)) {
+        if (r && r.office === state.office && r.date === todayKey()) await write("ratings", rid, null);
+      }
+    }
     if (ok) toast(undo ? "오늘 기록을 지웠어요." : `오늘 ${name} 먹은 걸로 기록했어요.`);
   }
 
   $("history").addEventListener("click", async (e) => {
     const eat = e.target.closest("[data-eat]");
     if (eat) return toggleEaten(eat.dataset.eat);
-    const rate = e.target.closest("[data-rate]");
-    if (rate) {
-      const day = todayDoc();
-      const next = day && day.rating === rate.dataset.rate ? null : rate.dataset.rate;
-      if (await updateToday({ rating: next })) toast(next ? "평가를 남겼어요. 다음 추천에 반영돼요." : "평가를 지웠어요.");
+    if (e.target.closest("[data-star-login]")) return openMe();
+    const star = e.target.closest("[data-stars]");
+    if (star && session) {
+      const stars = Number(star.dataset.stars);
+      const id = ratingId(session.id);
+      const ok = stars
+        ? await write("ratings", id, { office: state.office, date: todayKey(), person: session.id, stars, at: new Date().toISOString() })
+        : await write("ratings", id, null);
+      if (ok) toast(stars ? `별점 ${stars.toFixed(1)}점을 남겼어요. 다음 추천에 반영돼요.` : "별점을 지웠어요.");
     }
   });
 
