@@ -290,6 +290,9 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .star-half.left { left: 0; }
 .star-half.right { right: 0; }
 .star-half:focus-visible { outline: 2px solid var(--brand-dark); outline-offset: -2px; border-radius: 4px; }
+.stars.small .star { width: 20px; height: 20px; font-size: 20px; line-height: 20px; }
+.shop-stars { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.shop-rating { flex-basis: 100%; padding-left: 2px; }
 .star-value { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; min-width: 2.2em; }
 .star-avg { font-size: .82rem; color: var(--muted); }
 .today-field { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: .88rem; color: var(--muted); }

@@ -346,42 +346,47 @@
     return map;
   }
 
-  // 별점: 사람마다 하루 한 줄(rt_날짜_사람id). 무슨 메뉴·가게였는지는 그날 먹은 기록(days)에서 가져옴
-  const ratingId = (personId, date = todayKey()) => `rt_${date}_${personId}`;
+  // 가게 별점: 사람마다 가게 하나에 한 줄(rt_가게키_사람id)
+  // 가게키 = 카카오맵 장소 번호(k123…) 또는 직접 추가한 가게의 id
   const validStars = (v) => typeof v === "number" && v >= 0.5 && v <= 5 && Math.round(v * 2) === v * 2;
+  const shopKey = (shop) => {
+    const url = shop && (shop.kakaoUrl || shop.url);
+    if (typeof url === "string" && /^https?:\/\/place\.map\.kakao\.com\/\d+$/.test(url)) return "k" + url.split("/").pop();
+    return shop && shop.id ? String(shop.id) : null;
+  };
+  const ratingId = (key, personId) => `rt_${key}_${personId}`;
 
-  // 별점 집계: 메뉴별 / "메뉴|가게"별 { sum, count }. office 가 null 이면 모든 사무실
-  function ratingStats(office = state.office) {
-    const menus = new Map();
-    const shops = new Map();
-    const add = (map, key, v) => {
-      const s = map.get(key) || { sum: 0, count: 0 };
-      s.sum += v;
-      s.count += 1;
-      map.set(key, s);
-    };
-    const starred = new Set();
+  // 가게별 별점 집계: 가게키 → { sum, count, name, office }
+  function shopRatings() {
+    const map = new Map();
     Object.values(store.ratings).forEach((r) => {
-      if (!r || !validStars(r.stars) || (office && r.office !== office)) return;
-      const d = store.days[`${r.office}_${r.date}`];
-      if (!d || typeof d.menu !== "string") return;
-      add(menus, d.menu, r.stars);
-      if (typeof d.shop === "string" && d.shop) add(shops, `${d.menu}|${d.shop}`, r.stars);
-      starred.add(`${r.office}_${r.date}`);
+      if (!r || typeof r.shop !== "string" || !validStars(r.stars)) return;
+      const s = map.get(r.shop) || { sum: 0, count: 0, name: "", office: "" };
+      s.sum += r.stars;
+      s.count += 1;
+      if (typeof r.name === "string" && r.name) s.name = r.name;
+      if (OFFICES[r.office]) s.office = r.office;
+      map.set(r.shop, s);
     });
-    // 별점 이전의 👍/👎 기록도 반영 (👍 = 5점, 👎 = 1점)
-    Object.entries(store.days).forEach(([id, d]) => {
-      if (!d || (office && d.office !== office) || typeof d.menu !== "string" || starred.has(id)) return;
-      if (d.rating !== "up" && d.rating !== "down") return;
-      const v = d.rating === "up" ? 5 : 1;
-      add(menus, d.menu, v);
-      if (typeof d.shop === "string" && d.shop) add(shops, `${d.menu}|${d.shop}`, v);
-    });
-    return { menus, shops };
+    return map;
   }
 
   const avgOf = (s) => (s && s.count ? s.sum / s.count : 0);
   const ratingText = (s) => (s && s.count ? `★${avgOf(s).toFixed(1)} (${s.count}명)` : "");
+
+  // 가게 하나의 별점 줄: 내 별점(로그인 시 누를 수 있음) + 우리 평균
+  function shopStarsHtml(key, name, ratings) {
+    if (!key) return "";
+    const s = ratings.get(key);
+    const mine = session && store.ratings[ratingId(key, session.id)];
+    const my = mine && validStars(mine.stars) ? mine.stars : 0;
+    const avg = `<span class="star-avg">${s ? `우리 평균 ★${avgOf(s).toFixed(1)} (${s.count}명)` : "아직 별점 없음"}</span>`;
+    const picker = session
+      ? `<span class="stars small" data-shop-key="${esc(key)}" data-shop-name="${esc(name)}" role="group" aria-label="${esc(name)} 별점, 0.5점 단위">${starsHtml(my, true)}</span>
+         <span class="star-value">${my ? my.toFixed(1) : ""}</span>`
+      : `<button type="button" class="link-button" data-star-login>로그인하고 별점 주기</button>`;
+    return `<span class="shop-stars">${picker}${avg}</span>`;
+  }
 
   // 0.5점 단위 별 5개 (각 별의 왼쪽 반 = .5, 오른쪽 반 = 정수)
   function starsHtml(value, interactive) {
@@ -437,7 +442,6 @@
     const weather = WEATHERS[currentWeather().kind];
     const mood = MOODS[state.mood];
     const recent = recentEaten();
-    const ratings = ratingStats().menus;
 
     return MENUS.map((menu, index) => {
       const ups = [];
@@ -453,14 +457,7 @@
       if (weather.boost && menu.tags.includes(weather.boost)) extras.push({ text: weather.reason, delta: 1 });
       if (mood.tag && menu.tags.includes(mood.tag)) extras.push({ text: mood.label, delta: 1 });
       if (recent.has(menu.name)) extras.push({ text: `🕒 ${recent.get(menu.name)}일 전에 먹음`, delta: -1 });
-      const rs = ratings.get(menu.name);
-      if (rs && rs.count) {
-        const avg = avgOf(rs);
-        if (avg >= 4) extras.push({ text: `⭐ 우리 별점 ${avg.toFixed(1)}점`, delta: 1 });
-        else if (avg <= 2.5) extras.push({ text: `⭐ 우리 별점 ${avg.toFixed(1)}점`, delta: -1 });
-      }
-
-      // 좋아하는 사람 1명당 +1, 싫어하는 사람 1명당 -1, 날씨·기분 +1, 최근 먹음 -1, 별점 4점 이상 +1 / 2.5점 이하 -1
+      // 좋아하는 사람 1명당 +1, 싫어하는 사람 1명당 -1, 날씨·기분 +1, 최근 먹음 -1
       const score = ups.length - downs.length + extras.reduce((s, x) => s + x.delta, 0);
       return { ...menu, index, score, ups, downs, extras };
     }).sort((a, b) => b.score - a.score || a.index - b.index);
@@ -815,26 +812,13 @@
     auth.pending = "";
   }
 
-  // 그 사무실·날짜에 남긴 별점들의 평균
-  function dayAverage(office, date) {
-    const list = Object.values(store.ratings).filter((r) => r && r.office === office && r.date === date && validStars(r.stars));
-    return list.length ? { avg: list.reduce((s, r) => s + r.stars, 0) / list.length, count: list.length } : null;
-  }
-
-  function starPicker() {
-    const mine = session && store.ratings[ratingId(session.id)];
-    const value = mine && validStars(mine.stars) ? mine.stars : 0;
-    const avg = dayAverage(state.office, todayKey());
-    const summary = avg ? `<span class="star-avg">오늘 평균 ★${avg.avg.toFixed(1)} (${avg.count}명)</span>` : "";
-    if (!session) {
-      return `<span class="today-field">별점 <button class="link-button" data-star-login>로그인하고 별점 남기기</button> ${summary}</span>`;
+  // 오늘 간 가게에 별점 주기
+  function todayShopStars(day) {
+    const shop = day.shop && shopsOf(day.menu).find((s) => s.name === day.shop);
+    if (!shop) {
+      return shopsOf(day.menu).length ? `<span class="today-field hint">어디서 먹었는지 고르면 그 가게에 ⭐ 별점을 줄 수 있어요</span>` : "";
     }
-    return `<span class="today-field">내 별점
-        <span class="stars" role="group" aria-label="별점 0.5점 단위, 5점 만점">${starsHtml(value, true)}</span>
-        <span class="star-value">${value ? value.toFixed(1) : "–"}</span>
-        ${value ? `<button class="link-button" data-stars="0">지우기</button>` : ""}
-        ${summary}
-      </span>`;
+    return `<span class="today-field">${esc(shop.name)} 별점 ${shopStarsHtml(shopKey(shop), shop.name, shopRatings())}</span>`;
   }
 
   function renderConditions() {
@@ -884,18 +868,17 @@
         <div class="today-eaten">
           <span>오늘: ${emojiOf(day.menu)} <strong>${esc(day.menu)}</strong> 먹음</span>
           ${shopPicker}
-          ${starPicker()}
+          ${todayShopStars(day)}
           <button class="ghost small" data-eat="${esc(day.menu)}">기록 취소</button>
         </div>`;
     } else {
       today = `<p class="hint tight">점심을 먹은 뒤 메뉴 옆 🍽 버튼을 누르면 기록돼요. 기록한 메뉴는 ${RECENT_DAYS}일 동안 순위가 1점 내려가고,
-        각자 남긴 ⭐ 별점은 다음 추천에 반영돼요.</p>`;
+        간 가게를 고르면 ⭐ 가게 별점도 줄 수 있어요.</p>`;
     }
     const list = past.length
       ? `<div class="chips">${past.map((d) => {
           const [, m, dd] = d.date.split("-");
-          const avg = dayAverage(d.office, d.date);
-          const rate = avg ? ` ★${avg.avg.toFixed(1)}` : d.rating === "up" ? " 👍" : d.rating === "down" ? " 👎" : "";
+          const rate = "";
           const shop = typeof d.shop === "string" && d.shop ? ` · ${esc(d.shop)}` : "";
           return `<span class="chip">${Number(m)}/${Number(dd)} ${emojiOf(d.menu)} ${esc(d.menu)}${shop}${rate} <small>(${d.ago}일 전)</small></span>`;
         }).join("")}</div>`
@@ -1008,7 +991,7 @@
     }
     const r = state.kakaoResults[kakaoResultKey(m.name)];
     const saved = new Set(shopsOf(m.name).map((s) => s.name));
-    const shopRatings = ratingStats().shops;
+    const ratings = shopRatings();
     const radius = KAKAO_SEARCH_RADIUS >= 1000 ? `${KAKAO_SEARCH_RADIUS / 1000}km` : `${KAKAO_SEARCH_RADIUS}m`;
     let body = "";
     if (r && r.status === "loading") {
@@ -1029,7 +1012,7 @@
               <span class="pin-no">${i + 1}</span>
               ${isKakaoPlaceUrl(p.url) ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.name)}</a>` : `<strong>${esc(p.name)}</strong>`}
               <span class="shop-meta">${esc(p.category)} · ${p.distance}m · 도보 ${walkMinutes(p.distance)}분${
-                shopRatings.get(`${m.name}|${p.name}`) ? ` · 우리 평가 ${ratingText(shopRatings.get(`${m.name}|${p.name}`))}` : ""}</span>
+                ratings.get(shopKey(p)) ? ` · 우리 별점 ${ratingText(ratings.get(shopKey(p)))}` : ""}</span>
               ${isKakaoPlaceUrl(p.url) ? `<a class="review-link" href="${esc(p.url)}" target="_blank" rel="noopener">⭐ 별점·리뷰</a>` : ""}
               ${saved.has(p.name)
                 ? `<span class="saved">저장됨 ✓</span>`
@@ -1107,7 +1090,7 @@
 
   function renderShops(m) {
     const shops = shopsOf(m.name);
-    const shopRatings = ratingStats().shops;
+    const ratings = shopRatings();
     const area = OFFICES[state.office].area || "";
     const query = `${area} ${searchKeyword(m)}`.trim();
     const items = shops.length
@@ -1115,7 +1098,6 @@
           const meta = [
             Number(r.walk) > 0 ? `도보 ${Number(r.walk)}분` : "",
             Number(r.price) > 0 ? `${Number(r.price).toLocaleString("ko-KR")}원` : "",
-            ratingText(shopRatings.get(`${m.name}|${r.name}`)),
           ].filter(Boolean).join(" · ");
           const confirming = state.confirmDelete === r.id;
           const href = isKakaoPlaceUrl(r.kakaoUrl)
@@ -1124,6 +1106,7 @@
             <a href="${esc(href)}" target="_blank" rel="noopener">${esc(r.name)}</a>
             ${meta ? `<span class="shop-meta">${meta}</span>` : ""}
             <button class="ghost small ${confirming ? "danger" : ""}" data-del-shop="${esc(r.id)}">${confirming ? "정말 삭제?" : "삭제"}</button>
+            <div class="shop-rating">${shopStarsHtml(shopKey(r), r.name, ratings)}</div>
           </li>`;
         }).join("")}</ul>`
       : `<p class="hint tight">아직 등록된 가게가 없어요. 자주 가는 곳을 추가해 주세요.</p>`;
@@ -1233,7 +1216,7 @@
 
     const menuCount = new Map();
     meals.filter((d) => inLast(d.date, 30)).forEach((d) => menuCount.set(d.menu, (menuCount.get(d.menu) || 0) + 1));
-    const ratings = ratingStats(null);
+    const ratings = shopRatings();
 
     const requests = new Map();
     Object.values(store.requests).forEach((r) => {
@@ -1251,9 +1234,8 @@
       meals30: meals.filter((d) => inLast(d.date, 30)).length,
       perOffice,
       topMenus: [...menuCount].sort((x, y) => y[1] - x[1]).slice(0, 5),
-      topShops: [...ratings.shops].map(([k, s]) => ({ menu: k.split("|")[0], shop: k.split("|").slice(1).join("|"), ...s }))
-        .filter((s) => avgOf(s) >= 3.5).sort((x, y) => avgOf(y) - avgOf(x) || y.count - x.count).slice(0, 5),
-      ratings: ratings.menus,
+      topShops: [...ratings.values()].filter((s) => s.name)
+        .sort((x, y) => avgOf(y) - avgOf(x) || y.count - x.count).slice(0, 5),
       requests: [...requests.values()].sort((x, y) => y.count - x.count || y.last.localeCompare(x.last)),
     };
   }
@@ -1271,11 +1253,11 @@
     ].map(([k, v]) => `<div class="stat-tile"><div class="stat-value">${v}</div><div class="stat-label">${k}</div></div>`).join("");
     const officeRows = s.perOffice.map((o) => `<tr><td>${officeShort(o.key)}</td><td>${o.members}명</td><td>${o.days7}일</td><td>${o.avgGroup ? o.avgGroup.toFixed(1) + "명" : "–"}</td><td>${pct(o.recordRate)}</td></tr>`).join("");
     const menuRows = s.topMenus.length
-      ? s.topMenus.map(([name, n], i) => `<tr><td>${i + 1}</td><td>${emojiOf(name)} ${esc(name)}</td><td>${n}번</td><td>${ratingText(s.ratings.get(name)) || "–"}</td></tr>`).join("")
-      : `<tr><td colspan="4" class="empty">아직 먹은 기록이 없어요. 점심 후 🍽 버튼으로 기록해 주세요.</td></tr>`;
+      ? s.topMenus.map(([name, n], i) => `<tr><td>${i + 1}</td><td>${emojiOf(name)} ${esc(name)}</td><td>${n}번</td></tr>`).join("")
+      : `<tr><td colspan="3" class="empty">아직 먹은 기록이 없어요. 점심 후 🍽 버튼으로 기록해 주세요.</td></tr>`;
     const shopRows = s.topShops.length
-      ? s.topShops.map((x) => `<tr><td>${esc(x.shop)}</td><td>${esc(x.menu)}</td><td>${ratingText(x)}</td></tr>`).join("")
-      : `<tr><td colspan="3" class="empty">아직 가게 평가가 없어요.</td></tr>`;
+      ? s.topShops.map((x) => `<tr><td>${esc(x.name)}</td><td>${officeShort(x.office)}</td><td>${ratingText(x)}</td></tr>`).join("")
+      : `<tr><td colspan="3" class="empty">아직 가게 별점이 없어요. 근처 가게 목록에서 ⭐를 눌러 주세요.</td></tr>`;
     const reqRows = s.requests.length
       ? s.requests.map((r) => `<li><span>${esc(r.name)}</span><span class="req-count">${r.count}명 요청</span></li>`).join("")
       : `<li class="empty">아직 요청이 없어요.</li>`;
@@ -1296,13 +1278,13 @@
 
       <h3>인기 메뉴 (최근 30일)</h3>
       <div class="table-wrap"><table class="stats-table">
-        <thead><tr><th>순위</th><th>메뉴</th><th>먹은 횟수</th><th>평가</th></tr></thead>
+        <thead><tr><th>순위</th><th>메뉴</th><th>먹은 횟수</th></tr></thead>
         <tbody>${menuRows}</tbody>
       </table></div>
 
-      <h3>평가 좋은 가게</h3>
+      <h3>별점 높은 가게</h3>
       <div class="table-wrap"><table class="stats-table">
-        <thead><tr><th>가게</th><th>메뉴</th><th>평가</th></tr></thead>
+        <thead><tr><th>가게</th><th>사무실</th><th>우리 별점</th></tr></thead>
         <tbody>${shopRows}</tbody>
       </table></div>
 
@@ -1582,32 +1564,35 @@
     const undo = day && day.menu === name;
     const changed = !day || day.menu !== name;
     const ok = await updateToday(undo || changed ? { menu: undo ? null : name, shop: null, rating: null } : { menu: name });
-    // 먹은 메뉴가 바뀌면 그 메뉴에 남긴 오늘 별점은 지움
-    if (ok && day && day.menu && (undo || changed)) {
-      for (const [rid, r] of Object.entries(store.ratings)) {
-        if (r && r.office === state.office && r.date === todayKey()) await write("ratings", rid, null);
-      }
-    }
     if (ok) toast(undo ? "오늘 기록을 지웠어요." : `오늘 ${name} 먹은 걸로 기록했어요.`);
   }
 
   $("history").addEventListener("click", async (e) => {
     const eat = e.target.closest("[data-eat]");
     if (eat) return toggleEaten(eat.dataset.eat);
-    if (e.target.closest("[data-star-login]")) return openMe();
-    const star = e.target.closest("[data-stars]");
-    if (star && session) {
-      const stars = Number(star.dataset.stars);
-      const id = ratingId(session.id);
-      const ok = stars
-        ? await write("ratings", id, { office: state.office, date: todayKey(), person: session.id, stars, at: new Date().toISOString() })
-        : await write("ratings", id, null);
-      if (ok) toast(stars ? `별점 ${stars.toFixed(1)}점을 남겼어요. 다음 추천에 반영돼요.` : "별점을 지웠어요.");
-    }
+
   });
 
   $("history").addEventListener("change", (e) => {
     if (e.target.id === "today-shop") updateToday({ shop: e.target.value || null });
+  });
+
+  // 가게 별점 누르기 (근처 가게 목록, 오늘 간 가게 어디서든)
+  document.addEventListener("click", async (e) => {
+    if (e.target.closest("[data-star-login]")) return openMe();
+    const half = e.target.closest("[data-stars]");
+    const group = half && half.closest("[data-shop-key]");
+    if (!group || !session) return;
+    const key = group.dataset.shopKey;
+    const name = group.dataset.shopName;
+    const stars = Number(half.dataset.stars);
+    const id = ratingId(key, session.id);
+    const cur = store.ratings[id];
+    const clear = cur && cur.stars === stars; // 같은 점수를 다시 누르면 지움
+    const ok = clear
+      ? await write("ratings", id, null)
+      : await write("ratings", id, { shop: key, name, office: state.office, person: session.id, stars, at: new Date().toISOString() });
+    if (ok) toast(clear ? `${name} 별점을 지웠어요.` : `${name}에 별점 ${stars.toFixed(1)}점을 줬어요.`);
   });
 
   $("menus").addEventListener("click", async (e) => {
