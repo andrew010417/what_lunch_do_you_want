@@ -9,6 +9,7 @@
   const MAX_WHEEL = 12;
   const KAKAO_KEY_STORAGE = "bionexus-lunch-kakao-key";
   const WALK_METERS_PER_MIN = 67;
+  const LOCATE_RADIUS = 3000; // 직접 추가한 가게를 카카오맵에서 찾을 범위(m)
 
   const WEATHERS = {
     normal: { label: "☀️ 보통" },
@@ -214,7 +215,11 @@
   // 각자 로그인해서 저장한 취향
   function prefsOf(p) {
     const saved = p && store.prefs[p.id];
-    return { likes: (saved && strList(saved.likes)) || [], dislikes: (saved && strList(saved.dislikes)) || [] };
+    return {
+      likes: (saved && strList(saved.likes)) || [],
+      dislikes: (saved && strList(saved.dislikes)) || [],
+      allergies: ((saved && strList(saved.allergies)) || []).filter((a) => ALLERGENS.includes(a)),
+    };
   }
 
   // =================================================================
@@ -249,16 +254,18 @@
     return saved.hash === await sha256(`${id}:${secret}`) ? "ok" : "wrong";
   }
 
-  // 비밀번호가 맞으면 취향(+ 주 사무실) 저장.
+  // 비밀번호가 맞으면 취향(+ 주 사무실, 알레르기) 저장.
   // register = true 는 관리자가 비밀번호를 초기화한 뒤 새로 정할 때만
-  async function savePrefsAuthed(id, secret, likes, dislikes, register = false, office = null) {
+  // allergies = null 이면 예전 알레르기를 그대로 둠
+  async function savePrefsAuthed(id, secret, likes, dislikes, register = false, office = null, allergies = null) {
+    const keep = prefsOf(personById(id)).allergies;
     if (store.backend === "supabase") {
-      const { data, error } = await sb.rpc("lunch_save_prefs", {
-        p_person: id, p_secret: secret, p_likes: likes, p_dislikes: dislikes, p_register: register, p_office: office,
-      });
+      const args = { p_person: id, p_secret: secret, p_likes: likes, p_dislikes: dislikes, p_register: register, p_office: office };
+      if (allergies) args.p_allergies = allergies;
+      const { data, error } = await sb.rpc("lunch_save_prefs", args);
       if (error) return rpcFailure(error);
       if (data === "ok") {
-        store.prefs[id] = { likes, dislikes };
+        store.prefs[id] = { likes, dislikes, allergies: allergies || keep };
         if (office && store.people[id]) store.people[id] = { ...store.people[id], office };
         render();
       }
@@ -270,7 +277,7 @@
     if (v === "new" && !(await write("secrets", id, { hash: await sha256(`${id}:${secret}`) }))) return "error";
     if (v !== "new" && v !== "ok") return v;
     if (office && store.people[id].office !== office && !(await write("people", id, { ...store.people[id], office }))) return "error";
-    return (await write("prefs", id, { likes, dislikes })) ? "ok" : "error";
+    return (await write("prefs", id, { likes, dislikes, allergies: allergies || keep })) ? "ok" : "error";
   }
 
   // 가입: 성공하면 새 id, 아니면 "taken" | "invalid" | "error"
@@ -280,7 +287,7 @@
       if (error) return rpcFailure(error);
       if (/^u[0-9a-f]{12}$/.test(data)) {
         store.people[data] = { name, office };
-        store.prefs[data] = { likes: [], dislikes: [] };
+        store.prefs[data] = { likes: [], dislikes: [], allergies: [] };
       }
       return data;
     }
@@ -288,7 +295,7 @@
     const id = "u" + [...crypto.getRandomValues(new Uint8Array(6))].map((b) => b.toString(16).padStart(2, "0")).join("");
     const ok = await write("people", id, { name, office })
       && await write("secrets", id, { hash: await sha256(`${id}:${secret}`) })
-      && await write("prefs", id, { likes: [], dislikes: [] });
+      && await write("prefs", id, { likes: [], dislikes: [], allergies: [] });
     return ok ? id : "error";
   }
 
@@ -446,27 +453,31 @@
     return MENUS.map((menu, index) => {
       const ups = [];
       const downs = [];
+      const allergic = [];
       const extras = [];
       for (const p of people) {
-        const { likes, dislikes } = prefsOf(p);
+        const { likes, dislikes, allergies } = prefsOf(p);
         const liked = likes.filter((t) => matchesMenu(menu, t));
         const disliked = dislikes.filter((t) => matchesMenu(menu, t));
+        const risky = allergies.filter((a) => (menu.allergens || []).includes(a));
         if (liked.length) ups.push({ who: p.name, tags: liked });
         if (disliked.length) downs.push({ who: p.name, tags: disliked });
+        if (risky.length) allergic.push({ who: p.name, tags: risky });
       }
       if (weather.boost && menu.tags.includes(weather.boost)) extras.push({ text: weather.reason, delta: 1 });
       if (mood.tag && menu.tags.includes(mood.tag)) extras.push({ text: mood.label, delta: 1 });
       if (recent.has(menu.name)) extras.push({ text: `🕒 ${recent.get(menu.name)}일 전에 먹음`, delta: -1 });
       // 좋아하는 사람 1명당 +1, 싫어하는 사람 1명당 -1, 날씨·기분 +1, 최근 먹음 -1
       const score = ups.length - downs.length + extras.reduce((s, x) => s + x.delta, 0);
-      return { ...menu, index, score, ups, downs, extras };
-    }).sort((a, b) => b.score - a.score || a.index - b.index);
+      return { ...menu, index, score, ups, downs, allergic, extras };
+    }).sort((a, b) => (a.allergic.length > 0) - (b.allergic.length > 0) || b.score - a.score || a.index - b.index);
+    // 알레르기 재료가 들어갈 수 있는 메뉴는 점수와 상관없이 맨 아래
   }
 
-  // 숨기기 모드면 한 명이라도 싫어하는 메뉴 제외
+  // 숨기기 모드면 한 명이라도 싫어하거나 알레르기가 있는 메뉴 제외
   function visibleMenus() {
     const ranked = scoreMenus();
-    return state.hideDisliked ? ranked.filter((m) => m.downs.length === 0) : ranked;
+    return state.hideDisliked ? ranked.filter((m) => m.downs.length === 0 && m.allergic.length === 0) : ranked;
   }
 
   // =================================================================
@@ -640,7 +651,7 @@
           : `<button class="ghost small" data-login-as="${p.id}" title="본인만 수정할 수 있어요">🔑 본인이면 로그인</button>`}
       </div>`;
 
-    const { likes, dislikes } = prefsOf(p);
+    const { likes, dislikes, allergies } = prefsOf(p);
     const chips = (tags, cls) => tags.map((t) => `<span class="chip ${cls}">#${esc(t)}</span>`).join("");
     const row = (title, tags, cls) => `
       <div class="focus-row">
@@ -651,7 +662,13 @@
       </div>`;
     box.innerHTML = `${head}
       ${row("👍 좋아하는 음식", likes, "up")}
-      ${row("👎 싫어하는 음식", dislikes, "down")}`;
+      ${row("👎 싫어하는 음식", dislikes, "down")}
+      ${allergies.length ? `
+      <div class="focus-row">
+        <div class="focus-label allergy">🚫 알레르기</div>
+        <div class="chips">${chips(allergies, "allergy")}</div>
+        <div class="focus-menus">→ 주의할 메뉴: ${esc(MENUS.filter((m) => (m.allergens || []).some((a) => allergies.includes(a))).map((m) => m.name).join(", "))}</div>
+      </div>` : ""}`;
   }
 
   // 로그인·가입 창 / 내 취향 수정 창
@@ -664,12 +681,15 @@
   }
 
   function draftFrom(id) {
-    const { likes, dislikes } = prefsOf(personById(id));
-    return { likes: new Set(likes), dislikes: new Set(dislikes) };
+    const { likes, dislikes, allergies } = prefsOf(personById(id));
+    return { likes: new Set(likes), dislikes: new Set(dislikes), allergies: new Set(allergies) };
   }
 
   const officeOptions = (selected) => Object.entries(OFFICES)
     .map(([key, o]) => `<option value="${key}" ${selected === key ? "selected" : ""}>${o.label.replace("편", "")}${o.place ? ` (${esc(o.place)})` : ""}</option>`).join("");
+
+  const allergyChip = (a, on) =>
+    `<button type="button" class="chip tap ${on ? "allergy" : ""}" data-allergy="${esc(a)}" aria-pressed="${on}">${on ? "🚫 " : ""}${esc(a)}</button>`;
 
   const SECRET_LABEL = `제일 좋아하는 음식 <span class="pw-tag">(비밀번호)</span>`;
 
@@ -705,6 +725,11 @@
         <label class="me-field">주 사무실
           <select id="me-office">${officeOptions(auth.office || me.office)}</select>
         </label>
+        <div class="tag-group allergy-group">
+          <div class="tag-group-name">🚫 알레르기</div>
+          <p class="hint tight">있는 것만 눌러 주세요. 오늘 같이 먹을 때 그 재료가 들어갈 수 있는 메뉴는 맨 아래로 내려가고 ⚠️ 표시돼요. (같이 먹는 사람들에게 보여요)</p>
+          <div class="chips">${ALLERGENS.map((a) => allergyChip(a, d.allergies.has(a))).join("")}</div>
+        </div>
         <p class="hint tight">한 번 누르면 👍 좋아함, 두 번 누르면 👎 싫어함, 세 번 누르면 해제돼요. 언제든 다시 바꿀 수 있어요.</p>
         <div class="me-chips">${chips}</div>
         <button type="button" class="link-button request-link" data-request>찾는 메뉴가 없나요? 메뉴 추가 요청하기</button>
@@ -894,6 +919,16 @@
   const walkMinutes = (meters) => Math.max(1, Math.round(meters / WALK_METERS_PER_MIN));
   const searchKeyword = (menu) => menu.search || menu.name.split(/[·(]/)[0].trim();
   const officeCoords = {};
+  const officeCenter = (k = state.office) => officeCoords[k] || OFFICES[k].location;
+  const hasCoords = (r) => r && typeof r.lat === "number" && typeof r.lon === "number" && Number.isFinite(r.lat) && Number.isFinite(r.lon);
+  const fmtMeters = (m) => (m < 1000 ? `${m}m` : `${(m / 1000).toFixed(1)}km`);
+  // 두 좌표 사이 직선 거리(m)
+  function distanceM(a, b) {
+    const rad = (d) => (d * Math.PI) / 180;
+    const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+    return Math.round(6371000 * 2 * Math.asin(Math.sqrt(h)));
+  }
   const mapNodes = {}; // "사무실|메뉴" → { el, map, bounds } (다시 그려도 지도를 새로 만들지 않도록 보관)
   let kakaoPromise = null;
 
@@ -932,6 +967,44 @@
         resolve(officeCoords[officeKey]);
       });
     });
+  }
+
+  // 사무실 좌표를 카카오 주소 검색으로 정확히 (거리 계산용). 실패하면 data.js 의 대략 좌표 그대로
+  function refineOfficeCoords() {
+    const office = state.office;
+    if (!kakaoKey() || officeCoords[office]) return;
+    loadKakao().then((k) => officeLatLng(k, office)).then(render).catch(() => {});
+  }
+
+  // 가게 이름 → 사무실 근처에서 카카오맵 장소 찾기 (실제 위치 연결)
+  async function locatePlace(name) {
+    const kakao = await loadKakao();
+    const c = await officeLatLng(kakao, state.office);
+    const S = kakao.maps.services;
+    const places = await new Promise((resolve) => {
+      new S.Places().keywordSearch(name, (data, status) => resolve(status === S.Status.OK ? data : []), {
+        location: new kakao.maps.LatLng(c.lat, c.lon),
+        radius: LOCATE_RADIUS,
+        sort: S.SortBy.ACCURACY,
+        size: 5,
+      });
+    });
+    const p = places[0];
+    if (!p) return null;
+    const lat = Number(p.y), lon = Number(p.x);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return { lat, lon, place: p.place_name, ...(isKakaoPlaceUrl(p.place_url) ? { kakaoUrl: p.place_url } : {}) };
+  }
+
+  // 위치를 연결하면 별점 기준(가게 id)이 카카오 장소로 바뀌므로, 남긴 별점을 옮김
+  async function moveRatings(fromKey, toKey) {
+    if (!fromKey || !toKey || fromKey === toKey) return;
+    for (const [id, r] of Object.entries(store.ratings)) {
+      if (!r || r.shop !== fromKey) continue;
+      const newId = ratingId(toKey, r.person);
+      if (!store.ratings[newId]) await write("ratings", newId, { ...r, shop: toKey });
+      await write("ratings", id, null);
+    }
   }
 
   async function searchNearby(menu) {
@@ -1032,14 +1105,27 @@
       </div>`;
   }
 
-  // 검색 결과 지도: 사무실 🏢 + 가게 번호 핀
+  // 지도에 올릴 것: 카카오 검색 결과, 또는 "saved|사무실|메뉴|…" = 위치가 연결된 우리 가게
+  function mapSource(key) {
+    if (key.startsWith("saved|")) {
+      const [, office, menu] = key.split("|");
+      if (office !== state.office) return null;
+      const items = shopsOf(menu).filter((s) => s.meters != null)
+        .map((s) => ({ lat: s.lat, lon: s.lon, name: s.name, distance: s.meters }));
+      return { center: officeCenter(), items };
+    }
+    const r = state.kakaoResults[key];
+    return r && r.status === "ok" && r.center ? r : null;
+  }
+
+  // 지도: 사무실 🏢 + 가게 번호 핀
   function mountMaps() {
     const kakao = window.kakao;
     if (!kakao || !kakao.maps || !kakao.maps.Map) return;
     document.querySelectorAll(".kakao-map-slot").forEach((slot) => {
       const key = slot.dataset.mapKey;
-      const r = state.kakaoResults[key];
-      if (!r || r.status !== "ok" || !r.center) return;
+      const r = mapSource(key);
+      if (!r || !r.items.length) return;
       let node = mapNodes[key];
       if (node) {
         slot.replaceWith(node.el);
@@ -1065,7 +1151,7 @@
         pin.textContent = String(i + 1);
         const tip = document.createElement("span");
         tip.className = "pin-tip";
-        tip.textContent = `${p.name} · ${p.distance}m · 도보 ${walkMinutes(p.distance)}분`;
+        tip.textContent = `${p.name} · ${fmtMeters(p.distance)} · 도보 ${walkMinutes(p.distance)}분`;
         pin.appendChild(tip);
         const overlay = new kakao.maps.CustomOverlay({ map, position: pos, content: pin, yAnchor: 1.1, zIndex: 1 });
         const raise = () => overlay.setZIndex(10);
@@ -1081,11 +1167,17 @@
     });
   }
 
+  // 저장한 가게 + 사무실과의 거리 (위치가 연결된 가게는 좌표로 계산, 아니면 직접 입력한 도보 시간)
   function shopsOf(menuName) {
+    const center = officeCenter();
     return Object.entries(store.restaurants)
-      .map(([id, r]) => ({ id, ...r }))
+      .map(([id, r]) => {
+        const meters = hasCoords(r) ? distanceM(center, r) : null;
+        const walkMin = meters != null ? walkMinutes(meters) : Number(r.walk) > 0 ? Number(r.walk) : null;
+        return { id, ...r, meters, walkMin };
+      })
       .filter((r) => r.office === state.office && r.menu === menuName && typeof r.name === "string")
-      .sort((a, b) => (Number(a.walk) || 99) - (Number(b.walk) || 99));
+      .sort((a, b) => (a.walkMin || 99) - (b.walkMin || 99) || (a.meters || 0) - (b.meters || 0));
   }
 
   function renderShops(m) {
@@ -1093,18 +1185,26 @@
     const ratings = shopRatings();
     const area = OFFICES[state.office].area || "";
     const query = `${area} ${searchKeyword(m)}`.trim();
+    const located = shops.filter((r) => r.meters != null);
+    // 지도는 가게 목록이 바뀌면 새로 그림
+    const mapKey = `saved|${state.office}|${m.name}|${officeCoords[state.office] ? "k" : "a"}|${located.map((r) => r.id).join(",")}`;
     const items = shops.length
-      ? `<ul class="shop-list">${shops.map((r) => {
+      ? `${located.length && window.kakao && window.kakao.maps ? `<div class="kakao-map-slot" data-map-key="${esc(mapKey)}"></div>` : ""}
+        <ul class="shop-list">${shops.map((r) => {
           const meta = [
-            Number(r.walk) > 0 ? `도보 ${Number(r.walk)}분` : "",
+            r.meters != null ? `📍 사무실에서 ${fmtMeters(r.meters)} · 도보 ${r.walkMin}분` : r.walkMin ? `도보 ${r.walkMin}분 (직접 입력)` : "",
             Number(r.price) > 0 ? `${Number(r.price).toLocaleString("ko-KR")}원` : "",
+            r.place && r.place !== r.name ? `카카오맵: ${esc(r.place)}` : "",
           ].filter(Boolean).join(" · ");
+          const pinNo = r.meters != null ? located.indexOf(r) + 1 : 0;
           const confirming = state.confirmDelete === r.id;
           const href = isKakaoPlaceUrl(r.kakaoUrl)
             ? r.kakaoUrl : `https://map.kakao.com/link/search/${encodeURIComponent(area + " " + r.name)}`;
           return `<li>
+            ${pinNo ? `<span class="pin-no">${pinNo}</span>` : ""}
             <a href="${esc(href)}" target="_blank" rel="noopener">${esc(r.name)}</a>
             ${meta ? `<span class="shop-meta">${meta}</span>` : ""}
+            ${r.meters == null && kakaoKey() ? `<button class="ghost small" data-locate-shop="${esc(r.id)}" title="카카오맵에서 실제 위치를 찾아 거리를 계산해요">📍 위치 찾기</button>` : ""}
             <button class="ghost small ${confirming ? "danger" : ""}" data-del-shop="${esc(r.id)}">${confirming ? "정말 삭제?" : "삭제"}</button>
             <div class="shop-rating">${shopStarsHtml(shopKey(r), r.name, ratings)}</div>
           </li>`;
@@ -1116,7 +1216,7 @@
         ${items}
         <form class="shop-form" data-add-shop="${m.index}">
           <input id="shop-name-${m.index}" name="name" placeholder="가게 이름" maxlength="40" required />
-          <input id="shop-walk-${m.index}" name="walk" type="number" min="0" max="60" inputmode="numeric" placeholder="도보(분)" />
+          <input id="shop-walk-${m.index}" name="walk" type="number" min="0" max="60" inputmode="numeric" placeholder="도보(분)" title="카카오맵에서 위치를 찾으면 자동으로 계산돼요" />
           <input id="shop-price-${m.index}" name="price" type="number" min="0" step="500" inputmode="numeric" placeholder="1인 가격(원)" />
           <button class="primary small" type="submit">추가</button>
         </form>
@@ -1135,24 +1235,38 @@
 
     const all = scoreMenus();
     const ranked = visibleMenus();
-    const hidden = all.filter((m) => m.downs.length);
+    const hidden = all.filter((m) => m.downs.length || m.allergic.length);
     $("hidden-summary").hidden = !state.hideDisliked;
     $("hidden-summary").textContent = hidden.length
-      ? `누군가 싫어하는 메뉴 ${hidden.length}개를 숨겼어요: ${hidden.map((m) => m.name).join(", ")}`
+      ? `누군가 싫어하거나 알레르기가 있는 메뉴 ${hidden.length}개를 숨겼어요: ${hidden.map((m) => m.name).join(", ")}`
       : "숨긴 메뉴가 없어요. 체크한 사람 중 아무도 싫어하는 메뉴가 없습니다.";
 
+    // 오늘 같이 먹는 사람 중 알레르기 있는 사람 안내
+    const allergyPeople = selectedPeople()
+      .map((p) => ({ name: p.name, list: prefsOf(p).allergies }))
+      .filter((x) => x.list.length);
+    const risky = all.filter((m) => m.allergic.length).length;
+    $("allergy-summary").hidden = !allergyPeople.length;
+    $("allergy-summary").innerHTML = allergyPeople.length
+      ? `⚠️ <b>오늘 알레르기</b>: ${allergyPeople.map((x) => `${esc(x.name)}님(${esc(x.list.join(", "))})`).join(", ")}
+         → 해당 재료가 들어갈 수 있는 메뉴 ${risky}개는 맨 아래로 내리고 룰렛에서 뺐어요. 가게마다 재료가 다르니 주문할 때 꼭 물어보세요.`
+      : "";
+
     const eatenToday = (todayDoc() || {}).menu;
-    const fmt = (list) => list.map((r) => `${r.who}님(${r.tags.join(", ")})`).join(", ");
+    const fmt = (list) => esc(list.map((r) => `${r.who}님(${r.tags.join(", ")})`).join(", "));
 
     $("menus").innerHTML = ranked.map((m, i) => {
-      const cls = m.score > 0 ? "good" : m.score < 0 ? "bad" : "";
-      const badge = m.score > 0 ? `추천 +${m.score}` : m.score < 0 ? `비추 ${m.score}` : "";
+      const cls = m.allergic.length ? "allergy" : m.score > 0 ? "good" : m.score < 0 ? "bad" : "";
+      const badge = m.allergic.length ? "⚠️ 알레르기" : m.score > 0 ? `추천 +${m.score}` : m.score < 0 ? `비추 ${m.score}` : "";
       const reasons = [
+        m.allergic.length ? `<div class="allergy-line">⚠️ 알레르기 주의: ${fmt(m.allergic)}</div>` : "",
         m.ups.length ? `<div class="up">👍 ${fmt(m.ups)}</div>` : "",
         m.downs.length ? `<div class="down">👎 ${fmt(m.downs)}</div>` : "",
         ...m.extras.map((x) => `<div class="${x.delta > 0 ? "up" : "down"}">${x.text} ${x.delta > 0 ? "+1" : "-1"}</div>`),
       ].join("");
-      const shopCount = shopsOf(m.name).length;
+      const shops = shopsOf(m.name);
+      const shopCount = shops.length;
+      const nearest = shops.find((r) => r.walkMin);
       const open = state.openShops.has(m.name);
       const ate = eatenToday === m.name;
       return `
@@ -1165,7 +1279,7 @@
             ${reasons ? `<div class="reasons">${reasons}</div>` : ""}
             <div class="row-actions">
               <button class="ghost small ${ate ? "on" : ""}" data-eat="${esc(m.name)}">${ate ? "🍽 기록 취소" : "🍽 오늘 이거 먹었어요"}</button>
-              <button class="ghost small" data-shops="${esc(m.name)}" aria-expanded="${open}">🏪 근처 가게 ${shopCount} ${open ? "▴" : "▾"}</button>
+              <button class="ghost small" data-shops="${esc(m.name)}" aria-expanded="${open}">🏪 근처 가게 ${shopCount}${nearest ? ` · 가장 가까운 곳 도보 ${nearest.walkMin}분` : ""} ${open ? "▴" : "▾"}</button>
             </div>
           </div>
           ${badge ? `<span class="badge">${badge}</span>` : "<span></span>"}
@@ -1440,6 +1554,7 @@
     $("roulette-again").hidden = true;
 
     const step = (now) => {
+      if (state.roulette !== r) return; // 도는 중에 닫음
       const t = duration ? Math.min(1, (now - t0) / duration) : 1;
       const eased = 1 - Math.pow(1 - t, 3);
       r.rotation = from + (target - from) * eased;
@@ -1456,7 +1571,7 @@
   }
 
   function openRoulette() {
-    const ranked = visibleMenus();
+    const ranked = visibleMenus().filter((m) => m.allergic.length === 0); // 알레르기 메뉴는 룰렛에 안 올림
     if (!ranked.length) return toast("보여줄 메뉴가 없어요. 숨기기 모드를 꺼 보세요.");
     const top = ranked[0].score;
     let pool = ranked.filter((m) => m.score === top);
@@ -1602,6 +1717,7 @@
     if (t.dataset.shops) {
       const name = t.dataset.shops;
       state.openShops.has(name) ? state.openShops.delete(name) : state.openShops.add(name);
+      if (state.openShops.has(name)) refineOfficeCoords();
       return render();
     }
     if (t.dataset.kakaoSearch) return searchNearby(MENUS[Number(t.dataset.kakaoSearch)]);
@@ -1624,10 +1740,31 @@
         name: p.name,
         walk: walkMinutes(p.distance),
         price: 0,
+        place: p.name,
         ...(isKakaoPlaceUrl(p.url) ? { kakaoUrl: p.url } : {}),
         ...(Number.isFinite(p.lat) ? { lat: p.lat, lon: p.lon } : {}),
       });
       if (ok) toast(`${menu.name}에 '${p.name}'을(를) 저장했어요.`);
+      return;
+    }
+    if (t.dataset.locateShop) {
+      const id = t.dataset.locateShop;
+      const r = store.restaurants[id];
+      if (!r) return;
+      t.disabled = true;
+      t.textContent = "찾는 중…";
+      const loc = await locatePlace(r.name).catch(() => null);
+      if (!loc) {
+        t.disabled = false;
+        t.textContent = "📍 위치 찾기";
+        return toast(`카카오맵에서 '${r.name}'을(를) 못 찾았어요. 카카오맵에 나오는 가게 이름으로 다시 추가해 주세요.`);
+      }
+      const oldKey = shopKey({ id, ...r });
+      const next = { ...r, ...loc, walk: walkMinutes(distanceM(officeCenter(), loc)) };
+      if (await write("restaurants", id, next)) {
+        await moveRatings(oldKey, shopKey({ id, ...next }));
+        toast(`'${r.name}' 위치를 연결했어요: ${loc.place} · 사무실에서 ${fmtMeters(distanceM(officeCenter(), loc))}`);
+      }
       return;
     }
     if (t.dataset.delShop) {
@@ -1661,16 +1798,25 @@
     const name = String(fd.get("name") || "").trim();
     if (!name) return;
     const id = "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const button = form.querySelector("button[type=submit]");
+    if (button) button.disabled = true;
+    // 카카오맵에서 실제 위치를 찾으면 좌표·거리를 같이 저장
+    const loc = kakaoKey() ? await locatePlace(name).catch(() => null) : null;
+    const meters = loc ? distanceM(officeCenter(), loc) : null;
     const ok = await write("restaurants", id, {
       office: state.office,
       menu: menu.name,
       name,
-      walk: Math.max(0, Number(fd.get("walk")) || 0),
+      walk: loc ? walkMinutes(meters) : Math.max(0, Number(fd.get("walk")) || 0),
       price: Math.max(0, Number(fd.get("price")) || 0),
+      ...(loc || {}),
     });
+    if (button) button.disabled = false;
     if (ok) {
       ["name", "walk", "price"].forEach((f) => { const el = $(`shop-${f}-${form.dataset.addShop}`); if (el) el.value = ""; });
-      toast(`${menu.name}에 '${name}'을(를) 추가했어요.`);
+      toast(loc
+        ? `${menu.name}에 '${name}'을(를) 추가했어요. 카카오맵 위치 연결: ${loc.place} · 사무실에서 ${fmtMeters(meters)}`
+        : `${menu.name}에 '${name}'을(를) 추가했어요.`);
     }
   });
 
@@ -1769,6 +1915,12 @@
       render();
       return renderMe();
     }
+    if (t.dataset.allergy) {
+      const a = t.dataset.allergy, set = auth.draft.allergies;
+      set.has(a) ? set.delete(a) : set.add(a);
+      t.outerHTML = allergyChip(a, set.has(a)); // 스크롤 유지
+      return;
+    }
     if (t.dataset.cycle) {
       const tag = t.dataset.cycle, d = auth.draft;
       if (d.likes.has(tag)) { d.likes.delete(tag); d.dislikes.add(tag); }
@@ -1785,7 +1937,7 @@
     if ("saveMe" in t.dataset && session) {
       auth.busy = true; renderMe();
       const office = $("me-office") ? $("me-office").value : null;
-      const result = await savePrefsAuthed(session.id, session.secret, [...auth.draft.likes], [...auth.draft.dislikes], false, office);
+      const result = await savePrefsAuthed(session.id, session.secret, [...auth.draft.likes], [...auth.draft.dislikes], false, office, [...auth.draft.allergies]);
       auth.busy = false;
       if (result === "ok") {
         toast("내 취향을 저장했어요. 모두의 추천에 바로 반영돼요.");

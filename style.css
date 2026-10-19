@@ -161,6 +161,16 @@ button { font: inherit; cursor: pointer; }
 .menu.good .badge { background: var(--good); color: var(--card); }
 .menu.bad { background: var(--bad-bg); border-color: var(--bad-line); opacity: .7; }
 .menu.bad .badge { background: var(--bad); color: var(--card); }
+/* 알레르기: 맨 아래로 내려간 메뉴 (주황 경고색) */
+.menu.allergy { background: var(--maker-bg); border-color: var(--maker-line); border-style: dashed; }
+.menu.allergy .badge { background: var(--maker); color: var(--card); }
+.menu .reasons .allergy-line { color: var(--maker); font-weight: 700; }
+.allergy-summary { font-size: .88rem; line-height: 1.5; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px;
+  background: var(--maker-bg); border: 1px solid var(--maker-line); color: var(--text); }
+.allergy-summary b { color: var(--maker); }
+.chip.allergy { border-color: var(--maker-line); background: var(--maker-bg); color: var(--maker); font-weight: 700; }
+.focus-label.allergy { color: var(--maker); }
+.allergy-group { padding: 10px 12px; border-radius: 10px; border: 1px dashed var(--maker-line); margin-bottom: 10px; }
 .menu.flash { animation: flash 1.2s ease; }
 @keyframes flash { 0%, 60% { box-shadow: 0 0 0 4px var(--brand); } 100% { box-shadow: none; } }
 

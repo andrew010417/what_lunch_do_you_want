@@ -14,7 +14,7 @@ create table if not exists public.lunch_docs (
 );
 
 -- 담을 수 있는 기록 종류 (예전 버전에서 만든 표도 새 종류를 담을 수 있게 다시 정함)
---   people: 가입한 사람 / prefs: 취향 / days: 먹은 기록·평가·날씨 / restaurants: 저장한 가게
+--   people: 가입한 사람 / prefs: 취향(좋아요·싫어요·알레르기) / days: 먹은 기록·평가·날씨 / restaurants: 저장한 가게
 --   checkins: 오늘 어느 사무실에서 먹는지(출석 체크) / requests: 메뉴 추가 요청 / ratings: 각자 남긴 별점
 alter table public.lunch_docs drop constraint if exists lunch_docs_collection_check;
 alter table public.lunch_docs add constraint lunch_docs_collection_check
@@ -107,11 +107,13 @@ begin
 end;
 $$;
 
--- 맞으면 취향을 저장. p_register = true(처음 로그인 화면)일 때만 새 비밀번호를 등록. 결과는 위와 같음
+-- 맞으면 취향(좋아요·싫어요·알레르기)을 저장. p_allergies 가 없으면 예전 알레르기를 그대로 둠. p_register = true(처음 로그인 화면)일 때만 새 비밀번호를 등록. 결과는 위와 같음
 drop function if exists public.lunch_save_prefs(text, text, jsonb, jsonb);
 drop function if exists public.lunch_save_prefs(text, text, jsonb, jsonb, boolean);
+drop function if exists public.lunch_save_prefs(text, text, jsonb, jsonb, boolean, text);
 create or replace function public.lunch_save_prefs(p_person text, p_secret text, p_likes jsonb, p_dislikes jsonb,
-                                                   p_register boolean default false, p_office text default null)
+                                                   p_register boolean default false, p_office text default null,
+                                                   p_allergies jsonb default null)
 returns text
 language plpgsql
 security definer
@@ -121,7 +123,8 @@ declare
   v text;
 begin
   if jsonb_typeof(p_likes) is distinct from 'array' or jsonb_typeof(p_dislikes) is distinct from 'array'
-     or pg_column_size(p_likes) + pg_column_size(p_dislikes) > 6000 then
+     or (p_allergies is not null and jsonb_typeof(p_allergies) <> 'array')
+     or pg_column_size(p_likes) + pg_column_size(p_dislikes) + coalesce(pg_column_size(p_allergies), 0) > 6000 then
     return 'invalid';
   end if;
 
@@ -145,8 +148,13 @@ begin
   end if;
 
   insert into public.lunch_docs (collection, id, data, updated_at)
-  values ('prefs', p_person, jsonb_build_object('likes', p_likes, 'dislikes', p_dislikes), now())
-  on conflict (collection, id) do update set data = excluded.data, updated_at = now();
+  values ('prefs', p_person,
+          jsonb_build_object('likes', p_likes, 'dislikes', p_dislikes, 'allergies', coalesce(p_allergies, '[]'::jsonb)), now())
+  on conflict (collection, id) do update
+    set data = case when p_allergies is null
+                    then excluded.data || jsonb_build_object('allergies', coalesce(lunch_docs.data->'allergies', '[]'::jsonb))
+                    else excluded.data end,
+        updated_at = now();
 
   if p_office is not null and p_office ~ '^[a-z0-9_-]{1,30}$' then
     update public.lunch_docs
@@ -195,8 +203,8 @@ delete from public.lunch_secrets
  where person_id !~ '^u[0-9a-f]{12}$';
 
 revoke all on function public.lunch_check_secret(text, text) from public;
-revoke all on function public.lunch_save_prefs(text, text, jsonb, jsonb, boolean, text) from public;
+revoke all on function public.lunch_save_prefs(text, text, jsonb, jsonb, boolean, text, jsonb) from public;
 revoke all on function public.lunch_register(text, text, text) from public;
 grant execute on function public.lunch_check_secret(text, text) to anon, authenticated;
-grant execute on function public.lunch_save_prefs(text, text, jsonb, jsonb, boolean, text) to anon, authenticated;
+grant execute on function public.lunch_save_prefs(text, text, jsonb, jsonb, boolean, text, jsonb) to anon, authenticated;
 grant execute on function public.lunch_register(text, text, text) to anon, authenticated;
