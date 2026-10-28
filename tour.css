@@ -43,3 +43,17 @@
 @media (max-width: 600px) {
   .tour-map { height: 320px; }
 }
+
+/* 현재 순위 · 방문 평가 */
+.tour-rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.tour-rank li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tour-rank-no { width: 22px; height: 22px; line-height: 22px; border-radius: 50%; background: var(--maker-bg); color: var(--maker); border: 1px solid var(--maker-line); font-size: .78rem; font-weight: 700; text-align: center; }
+.tour-rank li:first-child .tour-rank-no { background: var(--star); color: #1f2937; border-color: var(--star); }
+.tour-rate-open { justify-self: start; }
+.tour-rate-form { display: grid; gap: 8px; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--soft); }
+.tour-rate-fields { display: flex; gap: 8px; flex-wrap: wrap; }
+.tour-rate-fields label { display: grid; gap: 4px; font-size: .82rem; font-weight: 700; flex: 1 1 160px; }
+.tour-rate-form input { font: inherit; font-size: .88rem; font-weight: 400; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); min-width: 0; }
+.tour-reviews li { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tour-date { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 2.8em; }
+.tour-note-text { color: var(--text); }

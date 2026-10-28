@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BioNexus 맛집 탐방</title>
+  <title>강남 점심 계약 후보</title>
   <link rel="icon" href="assets/logo.png" />
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="tour.css" />
@@ -12,11 +12,10 @@
   <header class="header">
     <img class="logo" src="assets/logo.png" alt="BioNexus" />
     <div class="header-text">
-      <h1>맛집 탐방 지도</h1>
-      <p class="sub">링크 속 가게를 하나씩 가 보고 다같이 별점을 매겨요</p>
+      <h1>강남 점심 계약 식당 고르기</h1>
+      <p class="sub">후보 8곳을 하나씩 가 보고, 갈 때마다 평가를 남겨 주세요</p>
     </div>
     <div class="header-side">
-      <button class="me-button" id="me-button">🔑 로그인</button>
       <span class="sync" id="sync">연결 중…</span>
     </div>
   </header>
@@ -34,16 +33,10 @@
 
   <section class="card">
     <div class="section-head">
-      <h2>가게 목록</h2>
+      <h2>후보 식당</h2>
       <div class="chips" id="sort-chips"></div>
     </div>
     <ol class="tour-list" id="list"></ol>
-    <form class="tour-add" id="add-form">
-      <div class="tag-group-name">➕ 링크 추가</div>
-      <input name="link" type="url" placeholder="후기·지도 링크 (https://…)" maxlength="300" required />
-      <input name="title" placeholder="메모 (예: 블로그 이름)" maxlength="40" />
-      <button class="primary small" type="submit">추가</button>
-    </form>
   </section>
 
   <footer class="credit">
@@ -51,9 +44,6 @@
     <div>제작 · 분석팀 <strong>박재형</strong></div>
   </footer>
 
-  <div class="overlay" id="me-panel" hidden>
-    <div class="me-box" role="dialog" aria-modal="true" aria-labelledby="me-title" id="me-body"></div>
-  </div>
   <div class="toast" id="toast" role="status" hidden></div>
 
   <script src="data.js"></script>
