@@ -1,0 +1,45 @@
+/* 맛집 탐방 지도 (style.css 위에 덧붙임) */
+.tour-progress { display: grid; gap: 8px; }
+.tour-stat { font-size: 1.05rem; }
+.tour-stat b { font-size: 1.5rem; color: var(--brand-dark); }
+.tour-bar { height: 10px; border-radius: 999px; background: var(--chip); overflow: hidden; }
+.tour-bar span { display: block; height: 100%; background: var(--star); border-radius: 999px; transition: width .3s; }
+
+.tour-map { width: 100%; height: 420px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: var(--soft); display: grid; place-items: center; }
+.tour-map .hint { padding: 16px; text-align: center; }
+.tour-pin { font: inherit; font-weight: 700; font-size: 13px; min-width: 26px; height: 26px; line-height: 22px; }
+.tour-pin.visited { background: var(--star); color: #1f2937; }
+.tour-pin.selected { background: var(--bad); color: #fff; transform: scale(1.15); }
+.pin-no.visited { background: var(--star); color: #1f2937; }
+
+.tour-popup { margin-top: 12px; padding: 14px 16px; border-radius: 12px; background: var(--selected); display: grid; gap: 8px; }
+.tour-close { margin-left: auto; }
+
+.tour-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.tour-item { display: grid; grid-template-columns: auto 1fr; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.tour-item.selected { border-color: var(--brand-dark); box-shadow: 0 0 0 2px var(--brand) inset; }
+.tour-item .pin-no { width: 28px; height: 28px; line-height: 28px; font-size: .85rem; }
+.tour-body { display: grid; gap: 6px; min-width: 0; }
+.tour-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tour-name { font: inherit; font-weight: 700; font-size: 1.02rem; color: var(--text); background: none; border: none; padding: 0; cursor: pointer; text-align: left; }
+.tour-name:hover { text-decoration: underline; }
+.tour-name.empty { color: var(--muted); font-weight: 600; cursor: default; }
+.tour-badge { font-size: .75rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--chip); color: var(--muted); white-space: nowrap; }
+.tour-badge.done { background: var(--maker-bg); color: var(--maker); border: 1px solid var(--maker-line); }
+.tour-links { display: flex; gap: 6px; flex-wrap: wrap; }
+.tour-links a { text-decoration: none; display: inline-block; }
+.tour-rate { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tour-rate-label { font-size: .85rem; font-weight: 700; }
+.tour-note, .tour-link-form, .tour-add { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.tour-note input, .tour-link-form input, .tour-add input { font: inherit; font-size: .88rem; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); flex: 1 1 180px; min-width: 0; }
+.tour-add { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--line); }
+.tour-add .tag-group-name { flex-basis: 100%; }
+.tour-candidates { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.tour-candidates li { display: flex; gap: 8px; align-items: center; }
+.tour-reviews { list-style: none; margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--soft); display: grid; gap: 4px; font-size: .85rem; }
+.stars.tiny .star { width: 14px; height: 14px; font-size: 14px; line-height: 14px; }
+.tour-tools { display: flex; gap: 12px; }
+
+@media (max-width: 600px) {
+  .tour-map { height: 320px; }
+}
