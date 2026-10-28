@@ -33,7 +33,7 @@
 | 안내 | 가입 전이면 가입 안내, 출석 전이면 출석 안내 |
 | 사용 통계 | 가입자, 사무실별 최근 7일 쓴 날·평균 인원·먹은 기록 비율, 인기 메뉴, 별점 높은 가게 |
 | 메뉴 추가 요청 | 없는 메뉴를 요청하면 모아서 보여 줌 |
-| 강남 계약 식당 후보 | [tour.html](https://andrew010417.github.io/what_lunch_do_you_want/tour.html): 강남 점심 계약 후보 8곳을 지도에 번호 핀으로 표시. 핀·이름을 누르면 후기 링크·카카오맵·길찾기. 로그인 없이 이름만 적고, 다녀올 때마다 0.5점 단위 별점 + 한줄평. 현재 순위(평균 별점)·방문 진행률 표시 |
+| 강남 계약 식당 후보 | [gangnam-lunch-contract](https://andrew010417.github.io/what_lunch_do_you_want/gangnam-lunch-contract/): 강남 점심 계약 후보 8곳 지도 + 방문할 때마다 평가 · 현재 순위 (사내 GitLab에는 별도 저장소) |
 
 ## 사무실
 | 탭 | 위치 | 주소 |
@@ -59,7 +59,7 @@
 | 파일 | 내용 |
 |---|---|
 | `index.html`, `style.css`, `app.js` | 화면과 동작 |
-| `tour.html`, `tour.css`, `tour.js` | 강남 계약 식당 후보 (후보 목록은 `tour.js` 맨 위 `PRESET`, `query`에 가게 이름을 넣으면 위치 자동 표시) |
+| `gangnam-lunch-contract/` | 강남 계약 식당 후보 페이지 (따로 떼어 쓸 수 있게 필요한 파일이 모두 들어 있음) |
 | `data.js` | 메뉴(알레르기 재료 포함), 음식 분류, 알레르기 목록, 사무실, 카카오·Supabase 키 |
 | `supabase.sql` | Supabase 설정 (표, 보안 규칙, 가입·로그인 함수) |
 

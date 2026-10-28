@@ -1,5 +1,6 @@
 // =====================================================================
-// 강남 점심 계약 식당 후보: 후보 식당을 지도에 표시하고, 다녀올 때마다 평가를 남김
+// 강남 점심 계약 식당 고르기: 후보 식당을 지도에 표시하고, 다녀올 때마다 평가를 남김
+// - 설정(카카오 키, Supabase, 사무실 위치)은 config.js
 // - 기록은 점심 고르기와 같은 Supabase 표(lunch_docs)에 저장
 //   restaurants: id "tour_…" (office: "tour" 라 점심 고르기 가게 목록에는 안 보임)
 //   ratings: id "vt_…" = 방문 1번의 평가 { kind: "visit", place, who, stars, note, date }
@@ -7,19 +8,27 @@
 // - 로그인 없이 이름만 적고 평가 (점심 고르기에 로그인돼 있으면 그 이름을 씀)
 // =====================================================================
 (() => {
-  // 계약 후보 식당. query 에 가게 이름을 넣으면 처음 연 사람의 화면에서
-  // 카카오맵으로 위치를 찾아 모두에게 저장 (비어 있으면 화면에서 가게 이름을 한 번 입력)
+  // 계약 후보 식당 (받은 링크 8개에서 확인한 가게 · 좌표는 네이버 지도 기준)
+  // - 위치가 틀리면 화면의 "위치가 틀렸나요?"로 고치면 모두에게 저장됨
+  // - 후보를 바꾸려면 이 목록을 고치면 됨 (id 는 평가 기록과 연결되니 기존 것은 바꾸지 말 것)
   const PRESET = [
-    { id: "tour_1", link: "https://naver.me/FhfQ2qZV", title: "네이버 지도 링크 1", query: "" },
-    { id: "tour_2", link: "https://naver.me/Ge7MElh4", title: "네이버 지도 링크 2", query: "" },
-    { id: "tour_3", link: "https://blog.naver.com/ho_ooon/224446248821", title: "하이드 온 스팟 (블로그)", query: "" },
-    { id: "tour_4", link: "https://blog.naver.com/rnbthug/224370527091", title: "건방진생선까스 Me,Myself & I (블로그)", query: "" },
-    { id: "tour_5", link: "https://blog.naver.com/swannnzy/224383397593", title: "1시간 전 (블로그)", query: "" },
-    { id: "tour_6", link: "https://blog.naver.com/ashley700/224419818147", title: "챙 라이프 (블로그)", query: "" },
-    { id: "tour_7", link: "https://blog.naver.com/tkdzmaaldald/224347521749", title: "횸의 일상기록 (블로그)", query: "" },
-    { id: "tour_8", link: "https://blog.naver.com/sungjoonman/224374006977", title: "용헬남 (블로그)", query: "" },
+    { id: "tour_1", name: "찬스찬스", category: "한식", address: "서울 서초구 서운로 136 르피에드인강남 지하1층",
+      lat: 37.4956165, lon: 127.0252197, link: "https://naver.me/FhfQ2qZV", title: "네이버 지도" },
+    { id: "tour_2", name: "썬앤문", category: "맥주·호프", address: "서울 서초구 서초대로77길 39 MK빌딩",
+      lat: 37.5011606, lon: 127.0251656, link: "https://naver.me/Ge7MElh4", title: "네이버 지도" },
+    { id: "tour_3", name: "오늘통닭 강남역점", category: "한식뷔페", address: "서울 서초구 서초대로74길 33 비트빌빌딩 1층",
+      lat: 37.4946532, lon: 127.0277713, link: "https://blog.naver.com/ho_ooon/224446248821", title: "블로그: 점심뷔페 추천, 혼밥 가능" },
+    { id: "tour_4", name: "놀란치킨 강남역본점", category: "한식뷔페", address: "서울 서초구 서초대로74길 29 1층",
+      lat: 37.4951182, lon: 127.0274495, link: "https://blog.naver.com/rnbthug/224370527091", title: "블로그: 9천원으로 즐기는 한식뷔페" },
+    { id: "tour_5", name: "강남백반집", category: "한식뷔페", address: "서울 서초구 서초대로77길 13 지하1층",
+      lat: 37.4988539, lon: 127.0261436, link: "https://blog.naver.com/swannnzy/224383397593", title: "블로그: 직장인 점심 혼밥 한식뷔페" },
+    { id: "tour_6", name: "광장포차", category: "한식뷔페", address: "서울 강남구 강남대로96길 20 2층",
+      lat: 37.4999433, lon: 127.0286453, link: "https://blog.naver.com/ashley700/224419818147", title: "블로그: 점심 한식뷔페, 직장인 혼밥" },
+    { id: "tour_7", name: "밀회관 강남삼성타운점", category: "한식뷔페", address: "서울 서초구 강남대로53길 8 스타크강남빌딩 1층",
+      lat: 37.494467, lon: 127.0280899, link: "https://blog.naver.com/tkdzmaaldald/224347521749", title: "블로그: 점심 한식뷔페, 가성비" },
+    { id: "tour_8", name: "속초오징어어시장 강남역점", category: "한식뷔페", address: "서울 강남구 강남대로78길 16 1층",
+      lat: 37.4950064, lon: 127.0307028, link: "https://blog.naver.com/sungjoonman/224374006977", title: "블로그: 8,500원, 라면·계란 무한리필" },
   ];
-  const BASE_OFFICE = "gangnam";         // 거리 계산·가게 검색 기준 사무실
   const SEARCH_RADIUS = 5000;            // 가게 이름으로 찾을 범위(m)
   const WALK_METERS_PER_MIN = 67;
   const SESSION_KEY = "bionexus-lunch-session";
@@ -93,7 +102,6 @@
       state.conn = "fail";
     }
     render();
-    autoLocate();
   }
 
   async function write(collection, id, data) {
@@ -114,7 +122,7 @@
   // ------------------------------------------------------------------
   // 식당 · 평가
   // ------------------------------------------------------------------
-  const officeCoords = { ...OFFICES[BASE_OFFICE].location };
+  const officeCoords = { ...OFFICE.location };
   function distanceM(a, b) {
     const rad = (d) => (d * Math.PI) / 180;
     const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
@@ -161,7 +169,6 @@
   let map = null;
   let overlays = [];
   let officeOverlay = null;
-  let mapReady = null;
 
   function loadKakao() {
     if (kakaoPromise) return kakaoPromise;
@@ -184,7 +191,7 @@
     try {
       const kakao = await loadKakao();
       await new Promise((resolve) => {
-        new kakao.maps.services.Geocoder().addressSearch(OFFICES[BASE_OFFICE].address, (res, status) => {
+        new kakao.maps.services.Geocoder().addressSearch(OFFICE.address, (res, status) => {
           if (status === kakao.maps.services.Status.OK && res[0]) {
             officeCoords.lat = Number(res[0].y);
             officeCoords.lon = Number(res[0].x);
@@ -202,18 +209,6 @@
         (회사 보안 프로그램이 지도를 막는 경우도 있어요. 목록과 평가는 그대로 쓸 수 있어요.)`;
       return false;
     }
-  }
-
-  // PRESET 의 query 로 아직 위치가 없는 후보를 카카오맵에서 찾아 저장 (처음 연 사람 화면에서 한 번)
-  async function autoLocate() {
-    if (!(await mapReady) || state.conn !== "ok") return;
-    for (const p of PRESET) {
-      const saved = store.restaurants[p.id];
-      if (!p.query || (saved && saved.office === "tour" && hasCoords(saved))) continue;
-      const found = await findPlaces(p.query).catch(() => []);
-      if (found[0]) await saveLocation(p.id, found[0], false);
-    }
-    fitMap();
   }
 
   function drawPins(list) {
@@ -328,7 +323,7 @@
     }
     const d = state.draft[s.id] || (state.draft[s.id] = { stars: 0 });
     const names = [...new Set(Object.values(store.people)
-      .filter((p) => p && p.office === BASE_OFFICE && typeof p.name === "string").map((p) => p.name))];
+      .filter((p) => p && p.office === OFFICE.key && typeof p.name === "string").map((p) => p.name))];
     return `<form class="tour-rate-form" data-rate-form="${esc(s.id)}">
       <div class="tour-rate">
         <span class="tour-rate-label">별점</span>
@@ -376,7 +371,7 @@
     }
     return `<p class="hint tight">${s.linked ? "위치가 틀렸으면 가게 이름으로 다시 찾아 주세요." : "후기 링크를 열어 가게 이름을 확인하고 입력하면, 지도에 표시되고 모두에게 저장돼요."}</p>
       <form class="tour-link-form" data-search="${esc(s.id)}">
-        <input name="q" maxlength="40" placeholder="가게 이름 (예: ○○식당 강남점)" value="${esc(s.linked ? s.name : s.query || "")}" required />
+        <input name="q" maxlength="40" placeholder="가게 이름 (예: ○○식당 강남점)" value="${esc(s.name || "")}" required />
         <button class="ghost small" type="submit">카카오맵에서 찾기</button>
         ${s.linked ? `<button class="link-button" type="button" data-cancel>취소</button>` : ""}
       </form>${found}`;
@@ -583,6 +578,6 @@
   });
 
   render();
-  mapReady = initMap();
+  initMap();
   connect();
 })();
